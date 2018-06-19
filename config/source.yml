@@ -1,0 +1,123 @@
+#连接的neo4j server服务器
+neo4jServer:
+  url:
+    #bolt://10.10.15.8:7687
+    #bolt://10.17.205.190:7687
+    #bolt://10.15.97.89:7687
+    #bolt://192.168.100.33:7687
+    bolt://10.10.15.27:7688
+  user:
+    neo4j
+  password:
+    #ywbz89
+    123456
+
+#ITCode2->ITName
+dictionaryServer:
+  host: 
+    10.10.15.129
+  port:
+    #8009
+    8010
+  path:
+    #/lookup
+
+#ITCode数据来源
+mssql:
+  mssql://app:app127@10.10.15.44/CRDB
+  #mssql://app:app127@10.10.15.43/CRDB
+  
+#设置查询neo4j server的超时时间
+lookupTimeout: 
+  30000                                         #超时设置150s
+  
+#设置每次预热path的间隔时间
+sleepTime:
+  100
+
+#设置加入预热的path条件
+warmUp_Condition:
+  queryNeo4jCost:
+    500                                        #查询neo4j所需时间
+  queryNeo4jRecords:
+    200                                        #查询neo4j返回记录数
+
+#主动预热path的redis地址
+warmUp_RedisInfo:
+  url_0:
+    redis://:finchina@10.15.97.135:6679/0       #存放ITCode         
+  url_1:
+    redis://:finchina@10.15.97.135:6679/1       #存放paths
+  TTL:
+    86400
+    
+#设置cache的信息
+NodeCache:
+  stdTTL: 
+    21600000
+  checkperiod: 
+    600
+  useClones: 
+    false
+
+#redis存储数据的keyName
+redisKeyName:
+  timestamp:                                    #记录读取ITCode2的timestamp
+    tsp_ITCode
+  allITCodes:                                   #记录所有的ITCode2
+    ITCodes_all 
+  warmUpITCodes:                                #记录预热数据的ITCode2
+    ITCodes_warmUp
+
+#设置各个路径的查询深度, 数据预热使用
+pathDepth:
+  DIDepth:
+    2                                           #直接投资关系路径深度
+  DIBDepth: 
+    2                                           #直接被投资关系路径深度
+
+#默认请求时的参数, 数据预热使用
+defaultQueryParams:
+  relation:
+    invests
+  returnNoCodeNodes:                            #是否返回无机构代码的机构
+    true
+  lowWeight:                                    #对外投资最低持股比例
+    0
+  highWeight:                                   #对外投资最高持股比例
+    100
+  lowFund:                                      #机构最低注册资本
+    null
+  highFund:                                     #机构最高注册资本
+    null
+  lowSubAmountRMB:                              #机构最低认缴金额
+    0
+  highSubAmountRMB:                             #机构最高认缴金额
+    100000000000000000
+  returnBranches:                               #是否返回分支机构
+    false
+  surStatus:
+    1
+  
+#定时触发主动查询需要预热的path数据
+schedule:
+  hour:
+    10
+  minute:
+    00
+
+#控制任务并发, 加锁机制信息
+lockInfo:
+  redisUrl:
+    - redis://:finchina@10.15.97.135:6679/2
+    - redis://:finchina@10.15.97.135:6679/3
+  resource:
+    - 'lockTimingWarmUpPaths_app'          #为lockTimingWarmUpPaths方法加锁
+  TTL:
+    #- 600000
+    - 21600000                             #加锁时间, 设置6h
+
+#日志相关信息设置
+logInfo:
+  maxLogSize:
+    20480000
