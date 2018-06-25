@@ -60,18 +60,57 @@ function errorResp(err, msg) {
     return { ok: err.code, error: msg || err.msg };
 }
 
+// log4js.configure({
+//     appenders: {
+//         'out': {
+//             type: 'file',         //文件输出
+//             filename: 'logs/queryDataInfo.log',
+//             maxLogSize: config.logInfo.maxLogSize
+//         }
+//     },
+//     categories: { default: { appenders: ['out'], level: 'info' } }
+// });
+// const logger = log4js.getLogger();
 log4js.configure({
+    // appenders: {
+    //     'out': {
+    //         type: 'file',         //文件输出
+    //         filename: 'logs/queryDataInfo.log',
+    //         maxLogSize: config.logInfo.maxLogSize
+    //     }
+    // },
+    // categories: { default: { appenders: ['out'], level: 'info' } }
     appenders: {
-        'out': {
-            type: 'file',         //文件输出
-            filename: 'logs/queryDataInfo.log',
+        console: {
+            type: 'console'
+        },
+        log: {
+            type: "dateFile",
+            filename: "./logs/log4js_log-",
+            pattern: "yyyy-MM-dd.log",
+            alwaysIncludePattern: true,
             maxLogSize: config.logInfo.maxLogSize
-        }
+        },
+        error: {
+            type: "dateFile",
+            filename: "./logs/log4js_err-",
+            pattern: "yyyy-MM-dd.log",
+            alwaysIncludePattern: true,
+            maxLogSize: config.logInfo.maxLogSize
+        },
+        errorFilter: {
+            type: "logLevelFilter",
+            appender: "error",
+            level: "error"
+        },
     },
-    categories: { default: { appenders: ['out'], level: 'info' } }
+    categories: {
+        default: { appenders: ['console', 'log', 'errorFilter'], level: 'info' }
+    },
+    pm2: true,
+    pm2InstanceVar: 'INSTANCE_ID'
 });
-
-const logger = log4js.getLogger();
+const logger = log4js.getLogger('graphTree_search_app');
 
 //定时触发请求neo4j server, 保持session的活跃
 function callNeo4jServer() {
@@ -875,6 +914,7 @@ let searchGraph = {
                 //先从redis中预热的数据中查询是否存在预热值
                 let warmUpKey = [code, DIDepth, lowWeight, highWeight, lowFund, highFund, j, relation].join('-');
                 let warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
+                let cacheKey = [j, code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, personalCode].join('-');
                 if (!warmUpValue) {
                     // let nodeId = await findNodeId(code);
                     let queryBody = null;
@@ -933,7 +973,8 @@ let searchGraph = {
                     else if (code) {
                         let resultPromise = null;
                         let getCacheStart = Date.now();
-                        let previousValue = await cacheHandlers.getCache(queryBody);
+                        //获取缓存
+                        let previousValue = await cacheHandlers.getCache(cacheKey);
                         let getCacheCost = Date.now() - getCacheStart;
                         console.log('directInvestPath_getCacheCost: ' + getCacheCost + 'ms');
                         logger.info('directInvestPath_getCacheCost: ' + getCacheCost + 'ms');
@@ -956,7 +997,7 @@ let searchGraph = {
                                     else if (personalCode != null) {
                                         sortTreeResult = pathTreeHandlers.fromTreePath1(nodeResult, personalCode, relation);
                                     }
-                                    cacheHandlers.setCache(queryBody, sortTreeResult);
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(sortTreeResult));
                                     //根据预热条件的阈值判断是否要加入预热
                                     let queryCostUp = config.warmUp_Condition.queryNeo4jCost;
                                     let recordsUp = config.warmUp_Condition.queryNeo4jRecords;
@@ -971,16 +1012,18 @@ let searchGraph = {
                                 }
                                 else if (nodeResult.length == 0) {
                                     let treeResult = { subLeaf: [], subLeafNum: 0 };
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(treeResult));
                                     return resolve(treeResult);
                                 }
                             }
                             else if (resultPromise.records.length == 0) {
                                 let treeResult = { subLeaf: [], subLeafNum: 0 };;
+                                cacheHandlers.setCache(cacheKey, JSON.stringify(treeResult));
                                 return resolve(treeResult);
                             }
                         }
                         else if (previousValue) {
-                            return resolve(previousValue);
+                            return resolve(JSON.parse(previousValue));
                         }
                     }
                 }
@@ -1015,6 +1058,7 @@ let searchGraph = {
                 //先从redis中预热的数据中查询是否存在预热值
                 let warmUpKey = [code, DIBDepth, lowWeight, highWeight, lowSubAmountRMB, highSubAmountRMB, j, relation].join('-');
                 let warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
+                let cacheKey = [j, code, relation, DIBDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches].join('-');
                 if (!warmUpValue) {
                     // let nodeId = await findNodeId(code);
                     let queryBody = null;
@@ -1061,7 +1105,8 @@ let searchGraph = {
                     else if (code) {
                         let resultPromise = null;
                         let getCacheStart = Date.now();
-                        let previousValue = await cacheHandlers.getCache(queryBody);
+                        //获取缓存
+                        let previousValue = await cacheHandlers.getCache(cacheKey);
                         let getCacheCost = Date.now() - getCacheStart;
                         console.log('directInvestedByPath_getCacheCost: ' + getCacheCost + 'ms');
                         logger.info('directInvestedByPath_getCacheCost: ' + getCacheCost + 'ms');
@@ -1078,7 +1123,7 @@ let searchGraph = {
                                 let nodeResult = result.pathDetail.data.pathDetail;
                                 if (nodeResult.length > 0) {
                                     let sortTreeResult = pathTreeHandlers.fromTreePath2(nodeResult, code, relation);
-                                    cacheHandlers.setCache(queryBody, sortTreeResult);
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(sortTreeResult));
                                     //根据预热条件的阈值判断是否要加入预热
                                     let queryCostUp = config.warmUp_Condition.queryNeo4jCost;
                                     let recordsUp = config.warmUp_Condition.queryNeo4jRecords;
@@ -1093,16 +1138,18 @@ let searchGraph = {
                                 }
                                 else if (nodeResult.length == 0) {
                                     let treeResult = { subLeaf: [], subLeafNum: 0 };
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(treeResult));
                                     return resolve(treeResult);
                                 }
                             }
                             else if (resultPromise.records.length == 0) {
                                 let treeResult = { subLeaf: [], subLeafNum: 0 };
+                                cacheHandlers.setCache(cacheKey, JSON.stringify(treeResult));
                                 return resolve(treeResult);
                             }
                         }
                         else if (previousValue) {
-                            return resolve(previousValue);
+                            return resolve(JSON.parse(previousValue));
                         }
                     }
                 }

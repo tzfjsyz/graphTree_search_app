@@ -10,18 +10,57 @@ const Pool = req('./lib/pool');
 const config = req('./config/source.yml');
 const log4js = require('log4js');
 
+// log4js.configure({
+//     appenders: {
+//         'out': {
+//             type: 'file',         //文件输出
+//             filename: 'logs/updateData.log',
+//             maxLogSize: config.logInfo.maxLogSize
+//         }
+//     },
+//     categories: { default: { appenders: ['out'], level: 'info' } }
+// });
+// const logger = log4js.getLogger();
 log4js.configure({
+    // appenders: {
+    //     'out': {
+    //         type: 'file',         //文件输出
+    //         filename: 'logs/queryDataInfo.log',
+    //         maxLogSize: config.logInfo.maxLogSize
+    //     }
+    // },
+    // categories: { default: { appenders: ['out'], level: 'info' } }
     appenders: {
-        'out': {
-            type: 'file',         //文件输出
-            filename: 'logs/updateData.log',
+        console: {
+            type: 'console'
+        },
+        log: {
+            type: "dateFile",
+            filename: "./logs/log4js_log-",
+            pattern: "yyyy-MM-dd.log",
+            alwaysIncludePattern: true,
             maxLogSize: config.logInfo.maxLogSize
-        }
+        },
+        error: {
+            type: "dateFile",
+            filename: "./logs/log4js_err-",
+            pattern: "yyyy-MM-dd.log",
+            alwaysIncludePattern: true,
+            maxLogSize: config.logInfo.maxLogSize
+        },
+        errorFilter: {
+            type: "logLevelFilter",
+            appender: "error",
+            level: "error"
+        },
     },
-    categories: { default: { appenders: ['out'], level: 'info' } }
+    categories: {
+        default: { appenders: ['console', 'log', 'errorFilter'], level: 'info' }
+    },
+    pm2: true,
+    pm2InstanceVar: 'INSTANCE_ID'
 });
-
-const logger = log4js.getLogger();
+const logger = log4js.getLogger('graphTree_search_app');
 
 let getWarmUpQueryData = {
     startQueryData: async function (flag) {

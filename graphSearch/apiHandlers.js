@@ -9,11 +9,11 @@ const log4js = require('log4js');
 // const Promise = require('bluebird');
 const req = require('require-yml');
 const config = req('./config/source.yml');
-const path = require('path');
+// const path = require('path');
 const cacheHandlers = require('./cacheHandlers.js');
-const pathTreeHandlers = require('./pathTreeHandlers.js');
+// const pathTreeHandlers = require('./pathTreeHandlers.js');
 // const getWarmUpQueryData = require('./getWarmUpQueryData.js');
-const sleep = require('system-sleep');
+// const sleep = require('system-sleep');
 const Redis = require('ioredis');
 const redis = new Redis(config.lockInfo.redisUrl[0]);
 const redis1 = new Redis(config.lockInfo.redisUrl[1]);
@@ -69,17 +69,45 @@ function errorResp(err, msg) {
 }
 
 log4js.configure({
+    // appenders: {
+    //     'out': {
+    //         type: 'file',         //文件输出
+    //         filename: 'logs/queryDataInfo.log',
+    //         maxLogSize: config.logInfo.maxLogSize
+    //     }
+    // },
+    // categories: { default: { appenders: ['out'], level: 'info' } }
     appenders: {
-        'out': {
-            type: 'file',         //文件输出
-            filename: 'logs/queryDataInfo.log',
+        console: {
+            type: 'console'
+        },
+        log: {
+            type: "dateFile",
+            filename: "./logs/log4js_log-",
+            pattern: "yyyy-MM-dd.log",
+            alwaysIncludePattern: true,
             maxLogSize: config.logInfo.maxLogSize
-        }
+        },
+        error: {
+            type: "dateFile",
+            filename: "./logs/log4js_err-",
+            pattern: "yyyy-MM-dd.log",
+            alwaysIncludePattern: true,
+            maxLogSize: config.logInfo.maxLogSize
+        },
+        errorFilter: {
+            type: "logLevelFilter",
+            appender: "error",
+            level: "error"
+        },
     },
-    categories: { default: { appenders: ['out'], level: 'info' } }
+    categories: {
+        default: { appenders: ['console', 'log', 'errorFilter'], level: 'info' }
+    },
+    pm2: true,
+    pm2InstanceVar: 'INSTANCE_ID'
 });
-
-const logger = log4js.getLogger();
+const logger = log4js.getLogger('graphTree_search_app');
 
 //定时主动预热paths
 let rule = new schedule.RecurrenceRule();
@@ -87,11 +115,11 @@ rule.dayOfWeek = [0, new schedule.Range(1, 6)];
 rule.hour = config.schedule.hour;
 rule.minute = config.schedule.minute;
 console.log('定时主动预热paths时间: ' + rule.hour + '时 ' + rule.minute + '分');
-logger.info('定时主动预热paths时间: ' + rule.hour + '时 ' + rule.minute + '分');
+// logger.info('定时主动预热paths时间: ' + rule.hour + '时 ' + rule.minute + '分');
 schedule.scheduleJob(rule, function () {
     redlock.lock(lockResource, lockTTL).then(async function (lock) {
         timingWarmUpPaths('true');
-        redlock.on('clientError', function(err) {
+        redlock.on('clientError', function (err) {
             console.error('A redis error has occurred:', err);
         });
     });
@@ -285,9 +313,9 @@ let apiHandlers = {
                 let queryResult = null;
                 let personalCode = null;
                 //判断code是否自然人的personalCode
-                if (code.slice(0,1) == 'P') {
-                    personalCode  = code;
-                    queryCode = parseInt(code.replace(/P/g, '')); 
+                if (code.slice(0, 1) == 'P') {
+                    personalCode = code;
+                    queryCode = parseInt(code.replace(/P/g, ''));
                     queryResult = await searchGraph.queryDirectInvestPath(queryCode, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, personalCode);
                 } else {
                     queryResult = await searchGraph.queryDirectInvestPath(code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, personalCode);
@@ -627,6 +655,18 @@ let apiHandlers = {
             return reply.response({ ok: 1, message: `delete the lock resource: '${lockResource}' succeess!` })
 
         } catch (err) {
+            return reply.response(err);
+        }
+    },
+
+    //清空缓存
+    deleteCacheData: async function (request, reply) {
+        try {
+            cacheHandlers.flushCache();
+            return reply.response({ ok: 1, message: 'flush the cache succeess!' });
+        } catch (err) {
+            console.error(err);
+            logger.error(err);
             return reply.response(err);
         }
     },
