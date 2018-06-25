@@ -38,7 +38,7 @@ sleepTime:
 #设置加入预热的path条件
 warmUp_Condition:
   queryNeo4jCost:
-    500                                        #查询neo4j所需时间
+    2000                                        #查询neo4j所需时间
   queryNeo4jRecords:
     200                                        #查询neo4j返回记录数
 
@@ -55,10 +55,15 @@ warmUp_RedisInfo:
 NodeCache:
   stdTTL: 
     21600000
-  checkperiod: 
-    600
-  useClones: 
-    false
+  # checkperiod: 
+  #   600
+  # useClones: 
+  #   false
+  redisUrl:                                     #存放paths cache
+    redis://:finchina@10.15.97.135:6679/11      #注意：需指定一个独立使用的db, 清空缓存时需要清空db中的所有内容
+  autoFlushCache:                               #程序重启是否清空缓存
+    #'true'
+    'fasle'
 
 #redis存储数据的keyName
 redisKeyName:
@@ -102,7 +107,7 @@ defaultQueryParams:
 #定时触发主动查询需要预热的path数据
 schedule:
   hour:
-    10
+    12
   minute:
     00
 
