@@ -247,17 +247,34 @@ let cacheHandlers = {
         });
     },
 
+    //删除redis中预热的paths 数据
+    deleteWarmUpPathsFromRedis: async function () {
+        redis_1.flushdb(function (err, res) {
+            if (!err) {
+                if (res != null) {
+                    console.log('delete the warmup paths data from redis db: ' + warmUp_RedisUrl_1 + ', status: ' + res);
+                    logger.info('delete the warmup paths data from redis db: ' + warmUp_RedisUrl_1 + ', status: ' + res);
+                }
+            }
+            else if (err) {
+                console.error(err);
+                logger.error(err);
+                return err;
+            }
+        });
+    },
+
     //记录数据更新的信息
     saveContext: async function (id, ctx) {
         let ctx_id = `ctx_${id}`;
-        let res = await redis_1.set(ctx_id, JSON.stringify(ctx));
+        let res = await redis_0.set(ctx_id, JSON.stringify(ctx));
         return res;
     },
 
     //读取数据更新的信息
     getContext: async function (id) {
         let ctx_id = `ctx_${id}`;
-        let res = await redis_1.get(ctx_id);
+        let res = await redis_0.get(ctx_id);
         if (res) {
             return JSON.parse(res);
         } else {

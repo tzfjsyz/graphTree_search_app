@@ -983,6 +983,8 @@ let searchGraph = {
                             // resultPromise = await session.run(queryBody);
 
                             resultPromise = await sessionRun1(queryBody);
+                            console.log('query neo4j server: ' +queryBody);
+                            logger.info('query neo4j server: ' +queryBody);
                             let directInvestPathQueryCost = Date.now() - directInvestPathQueryStart;
                             logger.info(`${code} DirectInvestPathQueryCost: ` + directInvestPathQueryCost + 'ms');
                             console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + `, ${code} DirectInvestPathQueryCost: ` + directInvestPathQueryCost + 'ms');
@@ -1115,6 +1117,8 @@ let searchGraph = {
                             // resultPromise = await session.run(queryBody);
 
                             resultPromise = await sessionRun2(queryBody);
+                            console.log('query neo4j server: ' +queryBody);
+                            logger.info('query neo4j server: ' +queryBody);
                             let directInvestedByPathQueryCost = Date.now() - directInvestedByPathQueryStart;
                             logger.info(`${code} directInvestedByPathQueryCost: ` + directInvestedByPathQueryCost + 'ms');
                             console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + `, ${code} directInvestedByPathQueryCost: ` + directInvestedByPathQueryCost + 'ms');

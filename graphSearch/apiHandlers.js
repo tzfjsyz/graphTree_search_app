@@ -670,6 +670,19 @@ let apiHandlers = {
             return reply.response(err);
         }
     },
+
+    //删除预热的paths数据
+    deleteWarmUpPaths: async function (request, reply) {
+        try {
+            cacheHandlers.deleteWarmUpPathsFromRedis();
+            return reply.response({ ok: 1, message: 'delete the warmup paths succeess!' });
+        } catch (err) {
+            console.error(err);
+            logger.error(err);
+            return reply.response(err);
+        }
+    }
+
 }
 
 
