@@ -981,8 +981,22 @@ let searchGraph = {
                         if (!previousValue) {
                             let directInvestPathQueryStart = Date.now();
                             // resultPromise = await session.run(queryBody);
-
-                            resultPromise = await sessionRun1(queryBody);
+                            let retryCount = 0;
+                            // let resultPromise = null;
+                            do {
+                                try {
+                                    resultPromise = await sessionRun1(queryBody);
+                                    break;
+                                } catch (err) {
+                                    retryCount++;
+                                    console.error(err);
+                                    logger.error(err);
+                                }
+                            } while (retryCount < 3)
+                            if (retryCount == 3) {
+                                console.error('sessionRun1 execute fail after trying 3 times: ' +queryBody);
+                                logger.error('sessionRun1 execute fail after trying 3 times: ' +queryBody);
+                            } 
                             console.log('query neo4j server: ' +queryBody);
                             logger.info('query neo4j server: ' +queryBody);
                             let directInvestPathQueryCost = Date.now() - directInvestPathQueryStart;
@@ -1115,8 +1129,22 @@ let searchGraph = {
                         if (!previousValue) {
                             let directInvestedByPathQueryStart = Date.now();
                             // resultPromise = await session.run(queryBody);
-
-                            resultPromise = await sessionRun2(queryBody);
+                            let retryCount = 0;
+                            // let resultPromise = null;
+                            do {
+                                try {
+                                    resultPromise = await sessionRun2(queryBody);
+                                    break;
+                                } catch (err) {
+                                    retryCount++;
+                                    console.error(err);
+                                    logger.error(err);
+                                }
+                            } while (retryCount < 3)
+                            if (retryCount == 3) {
+                                console.error('sessionRun2 execute fail after trying 3 times: ' +queryBody);
+                                logger.error('sessionRun2 execute fail after trying 3 times: ' +queryBody);
+                            } 
                             console.log('query neo4j server: ' +queryBody);
                             logger.info('query neo4j server: ' +queryBody);
                             let directInvestedByPathQueryCost = Date.now() - directInvestedByPathQueryStart;

@@ -1,0 +1,4 @@
+# User-specific files
+/logs/
+/node_modules/
+/build/

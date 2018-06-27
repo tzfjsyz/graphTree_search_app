@@ -113,6 +113,13 @@ server.route({
     handler: apiHandlers.deleteLockResource
 });
 
+//外部调用接口清空预热的paths
+server.route({
+    method: 'GET',
+    path: '/deleteWarmUpPaths',
+    handler: apiHandlers.deleteWarmUpPaths
+});
+
 //外部调用接口清空缓存
 server.route({
     method: 'GET',
