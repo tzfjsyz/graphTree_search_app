@@ -117,12 +117,17 @@ rule.minute = config.schedule.minute;
 console.log('定时主动预热paths时间: ' + rule.hour + '时 ' + rule.minute + '分');
 // logger.info('定时主动预热paths时间: ' + rule.hour + '时 ' + rule.minute + '分');
 schedule.scheduleJob(rule, function () {
-    redlock.lock(lockResource, lockTTL).then(async function (lock) {
-        timingWarmUpPaths('true');
-        redlock.on('clientError', function (err) {
-            console.error('A redis error has occurred:', err);
+    try {
+        redlock.lock(lockResource, lockTTL).then(async function (lock) {
+            timingWarmUpPaths('true');
+            redlock.on('clientError', function (err) {
+                console.error('A redis error has occurred:', err);
+            });
         });
-    });
+    } catch (err) {
+        console.error(err);
+        logger.error(err);
+    }
 });
 
 //定时触发主动查询需要预热的path数据
