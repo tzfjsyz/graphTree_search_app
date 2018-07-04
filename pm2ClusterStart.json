@@ -9,7 +9,25 @@
           "log_date_format" : "YYYY-MM-DD HH:mm:ss Z",
           "instances": 4,
           "instance_var": "INSTANCE_ID",
-          "exec_mode": "cluster"
+          "exec_mode": "cluster",
+          "env": {
+            "NODE_ENV": "production"
+          }
+        },
+        {
+          "name": "graphTree_search_app",
+          "script": "graphTree_search_app.js",
+          "error_file": "./logs/pm2Cluster_err.log",
+          "out_file": "./logs/pm2Cluster_out.log",
+          "merge_logs": true,
+          "log_date_format" : "YYYY-MM-DD HH:mm:ss Z",
+          "instances": 1,
+          "instance_var": "INSTANCE_ID",
+          "exec_mode": "cluster",
+          "env": {
+            "NODE_ENV": "production",
+            "WITH_SCHEDULE": "1"
+          }
         }
       ]
 }
