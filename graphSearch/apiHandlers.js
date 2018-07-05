@@ -17,6 +17,7 @@ const cacheHandlers = require('./cacheHandlers.js');
 const Redis = require('ioredis');
 const redis = new Redis(config.lockInfo.redisUrl[0]);
 const redis1 = new Redis(config.lockInfo.redisUrl[1]);
+const subClient = new Redis(config.redisPubSubInfo.clientUrl[0]);
 const Redlock = require('redlock');
 const lockResource = config.lockInfo.resource[0];
 const lockTTL = config.lockInfo.TTL[0];
@@ -116,14 +117,15 @@ rule.hour = config.schedule.hour;
 rule.minute = config.schedule.minute;
 console.log('定时主动预热paths时间: ' + rule.hour + '时 ' + rule.minute + '分');
 // logger.info('定时主动预热paths时间: ' + rule.hour + '时 ' + rule.minute + '分');
-//如果该进程的env属于WITH_SCHEDULE(只有1个实例运行)，则执行下面的scheduleJob
-if(process.env.WITH_SCHEDULE) {
+//如果该进程的env属于WITH_SCHEDULE(只有1个实例运行)，则执行下面的程序
+if (process.env.WITH_SCHEDULE) {
+    //单进程执行scheduleJob
     schedule.scheduleJob(rule, function () {
         try {
             redlock.lock(lockResource, lockTTL).then(async function (lock) {
                 timingWarmUpPaths('true');
-                console.log('process.pid: ' +process.pid +', process.env.WITH_SCHEDULE: ' +process.env.WITH_SCHEDULE);
-                logger.info('process.pid: ' +process.pid +', process.env.WITH_SCHEDULE: ' +process.env.WITH_SCHEDULE);
+                console.log('process.pid: ' + process.pid + ', process.env.WITH_SCHEDULE: ' + process.env.WITH_SCHEDULE);
+                logger.info('process.pid: ' + process.pid + ', process.env.WITH_SCHEDULE: ' + process.env.WITH_SCHEDULE);
                 console.log('run timingWarmUpPaths()...');
                 logger.info('run timingWarmUpPaths()...');
                 redlock.on('clientError', function (err) {
@@ -135,6 +137,30 @@ if(process.env.WITH_SCHEDULE) {
             logger.error(err);
         }
     });
+
+    //单进程执行subscribe
+    let channels = [];
+    channels = channels.concat(config.redisPubSubInfo.channelsName);
+    for (let channel of channels) {
+        try {
+            subClient.subscribe(channel, function () {
+                console.log('subscribe the channel: ', channel);
+                logger.info('subscribe the channel: ', channel);
+            });
+            subClient.on('message', function (channel, message) {
+                console.log('process.pid: ' + process.pid + ', receive message： %s from channel： %s', message, channel);
+                logger.info('process.pid: ' + process.pid + ', receive message： %s from channel： %s', message, channel);
+                let subMesage = config.redisPubSubInfo.subMessage[0];
+                if (message === subMesage) {
+                    cacheHandlers.deleteWarmUpPathsFromRedis();             //删除预热的paths
+                    cacheHandlers.flushCache();                             //清除缓存
+                }
+            });
+        } catch (err) {
+            console.error(err);
+            logger.error(err);
+        }
+    }
 }
 
 //定时触发主动查询需要预热的path数据

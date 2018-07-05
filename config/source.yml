@@ -47,7 +47,7 @@ warmUp_RedisInfo:
   url_0:
     redis://:finchina@10.15.97.135:6679/0       #存放ITCode         
   url_1:
-    redis://:finchina@10.15.97.135:6679/1       #存放paths
+    redis://:finchina@10.15.97.135:6679/9       #存放paths
   TTL:
     86400
     
@@ -126,3 +126,12 @@ lockInfo:
 logInfo:
   maxLogSize:
     20480000
+
+#redis发布与订阅信息
+redisPubSubInfo:
+  clientUrl:
+    - redis://:finchina@10.15.97.135:6679       #确保该redis的URL与导入程序的一致(消息发布者)
+  channelsName:
+    - 'updateDataNews'
+  subMessage:
+    - 'updateDataOver'
