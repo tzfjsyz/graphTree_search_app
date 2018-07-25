@@ -5,19 +5,19 @@
     "version": "0.2.0",
     "configurations": [
         //Ubuntu
-        {
-            "type": "node",
-            "request": "launch",
-            "name": "Launch Program",
-            "program": "${workspaceFolder}/graphTree_search_app.js"
-        },
-
-        //windows
         // {
         //     "type": "node",
         //     "request": "launch",
         //     "name": "Launch Program",
-        //     "program": "${workspaceRoot}\\graphTree_search_app.js"
-        // }
+        //     "program": "${workspaceFolder}/graphTree_search_app.js"
+        // },
+
+        //windows
+        {
+            "type": "node",
+            "request": "launch",
+            "name": "Launch Program",
+            "program": "${workspaceRoot}\\graphTree_search_app.js"
+        }
     ]
 }

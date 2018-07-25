@@ -254,7 +254,7 @@ async function handlerPromise(result, index) {
         for (let subRecord of result.records) {
             let pathArray = {};
             let uniquePathArray = {};
-            let eachPathArray = [];
+            // let eachPathArray = [];
             let tempPathArray = [];
             for (let subField of subRecord._fields) {
                 // let subFieldCodes = [];
@@ -262,15 +262,15 @@ async function handlerPromise(result, index) {
                 let uniqueFieldCodes = [];
                 for (let subSegment of subField.segments) {
                     let startSegmentCode = 0;
-                    if (subSegment.start.properties.ITCode2.low) {
+                    if (null != subSegment.start.properties.ITCode2.low) {
                         startSegmentCode = subSegment.start.properties.ITCode2.low;
-                    } else if (!subSegment.start.properties.ITCode2.low && subSegment.start.properties.ITCode2) {
+                    } else if (null == subSegment.start.properties.ITCode2.low && null != subSegment.start.properties.ITCode2) {
                         startSegmentCode = subSegment.start.properties.ITCode2;
                     }
                     let endSegmentCode = 0;
-                    if (subSegment.end.properties.ITCode2.low) {
+                    if (null != subSegment.end.properties.ITCode2.low) {
                         endSegmentCode = subSegment.end.properties.ITCode2.low;
-                    } else if (!subSegment.end.properties.ITCode2.low && subSegment.end.properties.ITCode2) {
+                    } else if (null == subSegment.end.properties.ITCode2.low && null != subSegment.end.properties.ITCode2) {
                         endSegmentCode = subSegment.end.properties.ITCode2;
                     }
                     // subFieldCodes.push(startSegmentCode, endSegmentCode);
@@ -295,148 +295,143 @@ async function handlerPromise(result, index) {
 
                     //取到start nodes的isPerson属性
                     let startIsPerson = null;
-                    if (subSegment.start.properties.isPerson) {
+                    if (null != subSegment.start.properties.isPerson) {
                         startIsPerson = subSegment.start.properties.isPerson;
-                    } else if (!subSegment.start.properties.isPerson && subSegment.start.properties.isPerson.low) {
+                    } else if (null == subSegment.start.properties.isPerson && null != subSegment.start.properties.isPerson.low) {
                         startIsPerson = subSegment.start.properties.isPerson.low;
                     }
 
                     //取到end nodes的isPerson属性
                     let endIsPerson = null;
-                    if (subSegment.end.properties.isPerson) {
+                    if (null != subSegment.end.properties.isPerson) {
                         endIsPerson = subSegment.end.properties.isPerson;
-                    } else if (!subSegment.end.properties.isPerson && subSegment.end.properties.isPerson.low) {
+                    } else if (null == subSegment.end.properties.isPerson && null != subSegment.end.properties.isPerson.low) {
                         endIsPerson = subSegment.end.properties.isPerson.low;
                     }
 
                     //通过isPerson为ITCode2取值
                     let startSegmentCode = null;
                     let endSegmentCode = null;
-                    if (startIsPerson == '1' || startIsPerson == 1) {
-                        let id = subSegment.start.properties.ITCode2.low;
-                        startSegmentCode = 'P' + pad(id, 9);
-                    } else {
+                    // if (startIsPerson == '1' || startIsPerson == 1) {
+                    //     let id = subSegment.start.properties.ITCode2.low;
+                    //     startSegmentCode = 'P' + pad(id, 9);
+                    // } else {
+                    //     startSegmentCode = subSegment.start.properties.ITCode2.low;
+                    // }
+                    // if (endIsPerson == '1' || endIsPerson == 1) {
+                    //     let id = subSegment.end.properties.ITCode2.low;
+                    //     endSegmentCode = 'P' + pad(id, 9);
+                    // } else {
+                    //     endSegmentCode = subSegment.end.properties.ITCode2.low;
+                    // }
+                    if (null != subSegment.start.properties.ITCode2) {
+                        startSegmentCode = subSegment.start.properties.ITCode2;
+                    }
+                    else if (null == subSegment.start.properties.ITCode2 && null != subSegment.start.properties.ITCode2.low) {
                         startSegmentCode = subSegment.start.properties.ITCode2.low;
                     }
-                    if (endIsPerson == '1' || endIsPerson == 1) {
-                        let id = subSegment.end.properties.ITCode2.low;
-                        endSegmentCode = 'P' + pad(id, 9);
-                    } else {
+                    if (null != subSegment.end.properties.ITCode2) {
+                        endSegmentCode = subSegment.end.properties.ITCode2;
+                    }
+                    else if (null == subSegment.end.properties.ITCode2 && null != subSegment.end.properties.ITCode2.low) {
                         endSegmentCode = subSegment.end.properties.ITCode2.low;
                     }
 
                     //处理无机构代码的start nodes的name问题
                     let startSegmentName = null;
-                    if (subSegment.start.properties.isExtra) {
-                        if (subSegment.start.properties.isExtra == 1 || subSegment.start.properties.isExtra == '1' || subSegment.start.properties.isExtra == 'null') {
-                            startSegmentName = subSegment.start.properties.name;
-                        } else if (subSegment.start.properties.isExtra == 0 || subSegment.start.properties.isExtra == '0') {
-                            startSegmentName = null;
-                            // allCodes.push(`${startSegmentCode}`); 
-                            allCodes.add(`${startSegmentCode}`);                                                                         //将有机构代码的ITCode存入数组
-                        }
-                    } else if (!subSegment.start.properties.isExtra && subSegment.start.properties.isExtra.low) {
-                        if (subSegment.start.properties.isExtra.low == 1 || subSegment.start.properties.isExtra.low == '1' || subSegment.start.properties.isExtra == 'null') {
-                            startSegmentName = subSegment.start.properties.name;
-                        } else if (subSegment.start.properties.isExtra.low == 0 || subSegment.start.properties.isExtra.low == '0') {
-                            startSegmentName = null;
-                            // allCodes.push(`${startSegmentCode}`);      
-                            allCodes.add(`${startSegmentCode}`);                                                                     //将有机构代码的ITCode存入数组
-                        }
+                    //取到start nodes的isExtra属性
+                    let startIsExtra = null;
+                    if (null != subSegment.start.properties.isExtra) {
+                        startIsExtra = subSegment.start.properties.isExtra;
+                    } 
+                    else if (null == subSegment.start.properties.isExtra && null != subSegment.start.properties.isExtra.low) {
+                        startIsExtra = subSegment.start.properties.isExtra.low;
+                    }
+                    if (startIsExtra == 1 || startIsExtra == '1' || startIsExtra == 'null') {
+                        startSegmentName = subSegment.start.properties.name;
+                    } 
+                    else if (startIsExtra == 0 || startIsExtra == '0') {
+                        startSegmentName = null;
+                        // allCodes.push(`${startSegmentCode}`);      
+                        allCodes.add(`${startSegmentCode}`);                                                                     //将有机构代码的ITCode存入数组
                     }
 
                     //取到start nodes的isExtra属性
-                    let startIsExtra = null;
-                    if (subSegment.start.properties.isExtra) {
-                        startIsExtra = subSegment.start.properties.isExtra;
-                    } else if (!subSegment.start.properties.isExtra && subSegment.start.properties.isExtra.low) {
-                        startIsExtra = subSegment.start.properties.isExtra.low;
-                    }
+                    // let startIsExtra = null;
+                    // if (null != subSegment.start.properties.isExtra) {
+                    //     startIsExtra = subSegment.start.properties.isExtra;
+                    // } else if (null == subSegment.start.properties.isExtra && null != subSegment.start.properties.isExtra.low) {
+                    //     startIsExtra = subSegment.start.properties.isExtra.low;
+                    // }
 
                     let relSegmentStartLow = subSegment.relationship.start.low;
-
                     //startRegCapitalRMB取值
-                    let startRegCapitalRMB = 0;                                                                    //注册资金(RMB)
-                    if (subSegment.start.properties.RMBFund) {
-                        startRegCapitalRMB = subSegment.start.properties.RMBFund;
-                        startRegCapitalRMB = parseFloat(startRegCapitalRMB.toFixed(2));                            //将RMBFund值转换2位小数              
-                    }
-                    else if (!subSegment.start.properties.RMBFund && subSegment.start.properties.RMBFund.low) {
-                        startRegCapitalRMB = subSegment.start.properties.RMBFund.low;
-                        startRegCapitalRMB = parseFloat(startRegCapitalRMB.toFixed(2));                            //将RMBFund值转换2位小数                           
-                    }
-
-                    //startRegCapital取值
-                    let startRegCapital = 0;                                                                       //注册资金(原单位)
-                    if (subSegment.start.properties.regFund) {
-                        startRegCapital = subSegment.start.properties.regFund;
-                        startRegCapital = parseFloat(startRegCapital.toFixed(2));                                  //将RegFund值转换2位小数              
-                    }
-                    else if (!subSegment.start.properties.regFund && subSegment.start.properties.regFund.low) {
-                        startRegCapital = subSegment.start.properties.regFund.low;
-                        startRegCapital = parseFloat(startRegCapital.toFixed(2));                                  //将RegFund值转换2位小数                           
-                    }
-
+                    let startRegCapitalRMB = 0; 
                     //startRegCapitalUnit取值
-                    let startRegCapitalUnit = '万人民币元';                                                         //注册资金单位
-                    if (subSegment.start.properties.regFundUnit) {
-                        startRegCapitalUnit = subSegment.start.properties.regFundUnit;
-                    }
-                    else if (!subSegment.start.properties.regFundUnit && subSegment.start.properties.regFundUnit.low) {
-                        startRegCapitalUnit = subSegment.start.properties.regFundUnit.low;
-                    }
+                    let startRegCapitalUnit = '万人民币元';                                                        //注册资金单位
+                    //startRegCapital取值
+                    let startRegCapital = 0;                                                                      //注册资金(原单位)
+                    if (startIsPerson == 0 || startIsPerson == '0') {
+                        if (null != subSegment.start.properties.RMBFund) {
+                            startRegCapitalRMB = subSegment.start.properties.RMBFund;
+                        }
+                        else if (null == subSegment.start.properties.RMBFund && null != subSegment.start.properties.RMBFund.low) {
+                            startRegCapitalRMB = subSegment.start.properties.RMBFund.low;
+                        }
+                        startRegCapitalRMB = parseFloat(startRegCapitalRMB.toFixed(2));                            //将RMBFund值转换2位小数              
+                        if (null != subSegment.start.properties.regFundUnit) {
+                            startRegCapitalUnit = subSegment.start.properties.regFundUnit;
+                        }
+                        else if (null == subSegment.start.properties.regFundUnit && null != subSegment.start.properties.regFundUnit.low) {
+                            startRegCapitalUnit = subSegment.start.properties.regFundUnit.low;
+                        }
+                        if (null != subSegment.start.properties.regFund) {
+                            startRegCapital = subSegment.start.properties.regFund;
+                        }
+                        else if (null == subSegment.start.properties.regFund && null != subSegment.start.properties.regFund.low) {
+                            startRegCapital = subSegment.start.properties.regFund.low;
+                        }    
+                        startRegCapital = parseFloat(startRegCapital.toFixed(2));                                  //将RegFund值转换2位小数              
+                    }                                                      
 
                     //处理持股比例shareholdRatio, 认缴金额(RMB)shareholdQuantityRMB, 认缴金额shareholdQuantity, 认缴金额单位shareholdQuantityUnit
                     let relSegmentEndLow = subSegment.relationship.end.low;
                     //持股比例shareholdRatio取值, 如果weight是全量导入的，直接取weight的值；如果weight是增量导入的，需要取到weight节点下的low值
-                    let shareholdRatio = 0;                                                                                                //持股比例
-                    if (Object.keys(subSegment.relationship.properties).length > 0) {
-                        if (subSegment.relationship.properties.weight.low) {
-                            shareholdRatio = subSegment.relationship.properties.weight.low;
-                            shareholdRatio = parseFloat(shareholdRatio.toFixed(2));                                                       //将weight值转换2位小数
-                        }
-                        else if (!subSegment.relationship.properties.weight.low && subSegment.relationship.properties.weight) {
-                            shareholdRatio = subSegment.relationship.properties.weight;
-                            shareholdRatio = parseFloat(shareholdRatio.toFixed(2));                                                       //将weight值转换2位小数
-                        }
-                    }
-
+                    let shareholdRatio = 0; 
                     //认缴金额(RMB)shareholdQuantityRMB取值
-                    let shareholdQuantityRMB = 0;                                                                                           //认缴金额(RMB)
-                    if (Object.keys(subSegment.relationship.properties).length > 0) {
-                        if (subSegment.relationship.properties.subAmountRMB && subSegment.relationship.properties.subAmountRMB.low) {
-                            shareholdQuantityRMB = subSegment.relationship.properties.subAmountRMB.low;
-                            shareholdQuantityRMB = parseFloat(shareholdQuantityRMB.toFixed(2));                                              //将subAmountRMB值转换2位小数
-                        }
-                        else if (!subSegment.relationship.properties.subAmountRMB.low && subSegment.relationship.properties.subAmountRMB) {
-                            shareholdQuantityRMB = subSegment.relationship.properties.subAmountRMB;
-                            shareholdQuantityRMB = parseFloat(shareholdQuantityRMB.toFixed(2));                                              //将subAmountRMB值转换2位小数
-                        }
-                    }
-
+                    let shareholdQuantityRMB = 0;                                                                                         //认缴金额(RMB)
                     //认缴金额shareholdQuantity取值
-                    let shareholdQuantity = 0;                                                                                               //认缴金额
-                    if (Object.keys(subSegment.relationship.properties).length > 0) {
-                        if (subSegment.relationship.properties.subAmount.low) {
-                            shareholdQuantity = subSegment.relationship.properties.subAmount.low;
-                            shareholdQuantity = parseFloat(shareholdQuantity.toFixed(2));                                                     //将subAmount值转换2位小数
-                        }
-                        else if (!subSegment.relationship.properties.subAmount.low && subSegment.relationship.properties.subAmount) {
-                            shareholdQuantity = subSegment.relationship.properties.subAmount;
-                            shareholdQuantity = parseFloat(shareholdQuantity.toFixed(2));                                                      //将subAmount值转换2位小数
-                        }
-                    }
-
+                    let shareholdQuantity = 0;                                                                                            //持股比例
                     //认缴金额单位shareholdQuantityUnit取值
-                    let shareholdQuantityUnit = '万人民币元';                                                                                    //认缴金额单位
+                    let shareholdQuantityUnit = '万人民币元';                                                                              //认缴金额单位
                     if (Object.keys(subSegment.relationship.properties).length > 0) {
-                        if (subSegment.relationship.properties.subAmountUnit.low) {
+                        if (null != subSegment.relationship.properties.weight.low) {
+                            shareholdRatio = subSegment.relationship.properties.weight.low;
+                        }
+                        else if (null == subSegment.relationship.properties.weight.low && null != subSegment.relationship.properties.weight) {
+                            shareholdRatio = subSegment.relationship.properties.weight;
+                        }
+                        shareholdRatio = parseFloat(shareholdRatio.toFixed(2));                                                            //将weight值转换2位小数
+                        if (null != subSegment.relationship.properties.subAmountRMB.low) {
+                            shareholdQuantityRMB = subSegment.relationship.properties.subAmountRMB.low;
+                        }
+                        else if (null == subSegment.relationship.properties.subAmountRMB.low && null != subSegment.relationship.properties.subAmountRMB) {
+                            shareholdQuantityRMB = subSegment.relationship.properties.subAmountRMB;
+                        }
+                        shareholdQuantityRMB = parseFloat(shareholdQuantityRMB.toFixed(2));                                                //将subAmountRMB值转换2位小数
+                        if (null != subSegment.relationship.properties.subAmount.low) {
+                            shareholdQuantity = subSegment.relationship.properties.subAmount.low;
+                        }
+                        else if (null == subSegment.relationship.properties.subAmount.low && null != subSegment.relationship.properties.subAmount) {
+                            shareholdQuantity = subSegment.relationship.properties.subAmount;
+                        }
+                        shareholdQuantity = parseFloat(shareholdQuantity.toFixed(2));                                                     //将subAmount值转换2位小数
+                        if (null != subSegment.relationship.properties.subAmountUnit.low) {
                             shareholdQuantityUnit = subSegment.relationship.properties.subAmountUnit.low;
                         }
-                        else if (!subSegment.relationship.properties.subAmountUnit.low && subSegment.relationship.properties.subAmountUnit) {
+                        else if (null == subSegment.relationship.properties.subAmountUnit.low && null != subSegment.relationship.properties.subAmountUnit) {
                             shareholdQuantityUnit = subSegment.relationship.properties.subAmountUnit;
                         }
-
                     }
 
                     let endSegmentLow = subSegment.end.identity.low;
@@ -451,62 +446,60 @@ async function handlerPromise(result, index) {
 
                     //处理无机构代码的end nodes的name问题
                     let endSegmentName = null;
-                    if (subSegment.end.properties.isExtra) {
-                        if (subSegment.end.properties.isExtra == 1 || subSegment.end.properties.isExtra == '1' || subSegment.end.properties.isExtra == 'null') {
-                            endSegmentName = subSegment.end.properties.name;
-                        } else if (subSegment.end.properties.isExtra == 0 || subSegment.end.properties.isExtra == '0') {
-                            endSegmentName = null;
-                            // allCodes.push(`${endSegmentCode}`);    
-                            allCodes.add(`${endSegmentCode}`);                                                                      //将有机构代码的ITCode存入数组
-                        }
-                    } else if (!subSegment.end.properties.isExtra && subSegment.end.properties.isExtra.low) {
-                        if (subSegment.end.properties.isExtra.low == 1 || subSegment.end.properties.isExtra.low == '1' || subSegment.end.properties.isExtra == 'null') {
-                            endSegmentName = subSegment.end.properties.name;
-                        } else if (subSegment.end.properties.isExtra.low == 0 || subSegment.end.properties.isExtra.low == '0') {
-                            endSegmentName = null;
-                            // allCodes.push(`${endSegmentCode}`); 
-                            allCodes.add(`${endSegmentCode}`);                                                                        //将有机构代码的ITCode存入数组
-                        }
+                    //取到end nodes的isExtra属性
+                    let endIsExtra = null;
+                    if (null != subSegment.end.properties.isExtra) {
+                        endIsExtra = subSegment.end.properties.isExtra;
+                    } 
+                    else if (null == subSegment.end.properties.isExtra && null != subSegment.end.properties.isExtra.low) {
+                        endIsExtra = subSegment.end.properties.isExtra.low;
+                    }
+                    if (endIsExtra == 1 || endIsExtra == '1' || endIsExtra == 'null') {
+                        endSegmentName = subSegment.end.properties.name;
+                    } 
+                    else if (endIsExtra == 0 || endIsExtra == '0') {
+                        endSegmentName = null;
+                        // allCodes.push(`${endSegmentCode}`); 
+                        allCodes.add(`${endSegmentCode}`);                                                                        //将有机构代码的ITCode存入数组
                     }
 
                     //取到end nodes的isExtra属性
-                    let endIsExtra = null;
-                    if (subSegment.end.properties.isExtra) {
-                        endIsExtra = subSegment.end.properties.isExtra;
-                    } else if (!subSegment.end.properties.isExtra && subSegment.end.properties.isExtra.low) {
-                        endIsExtra = subSegment.end.properties.isExtra.low;
-                    }
+                    // let endIsExtra = null;
+                    // if (null != subSegment.end.properties.isExtra) {
+                    //     endIsExtra = subSegment.end.properties.isExtra;
+                    // } else if (null == subSegment.end.properties.isExtra && null != subSegment.end.properties.isExtra.low) {
+                    //     endIsExtra = subSegment.end.properties.isExtra.low;
+                    // }
 
                     //endRegCapitalRMB取值
                     let endRegCapitalRMB = 0;                                                                    //注册资金(RMB)
-                    if (subSegment.end.properties.RMBFund) {
-                        endRegCapitalRMB = subSegment.end.properties.RMBFund;
-                        endRegCapitalRMB = parseFloat(endRegCapitalRMB.toFixed(2));                              //将RMBFund值转换2位小数              
-                    }
-                    else if (!subSegment.end.properties.RMBFund && subSegment.end.properties.RMBFund.low) {
-                        endRegCapitalRMB = subSegment.end.properties.RMBFund.low;
-                        endRegCapitalRMB = parseFloat(endRegCapitalRMB.toFixed(2));                              //将RMBFund值转换2位小数                           
-                    }
-
                     //endRegCapital取值
                     let endRegCapital = 0;                                                                       //注册资金(原单位)
-                    if (subSegment.end.properties.regFund) {
-                        endRegCapital = subSegment.end.properties.regFund;
-                        endRegCapital = parseFloat(endRegCapital.toFixed(2));                                  //将RegFund值转换2位小数              
-                    }
-                    else if (!subSegment.end.properties.regFund && subSegment.end.properties.regFund.low) {
-                        endRegCapital = subSegment.end.properties.regFund.low;
-                        endRegCapital = parseFloat(endRegCapital.toFixed(2));                                  //将RegFund值转换2位小数                           
-                    }
-
                     //endRegCapitalUnit取值
                     let endRegCapitalUnit = '万人民币元';                                                         //注册资金单位
-                    if (subSegment.end.properties.regFundUnit) {
-                        endRegCapitalUnit = subSegment.end.properties.regFundUnit;
+                    if (endIsPerson == 0 || endIsPerson == '0') {
+                        if (null != subSegment.end.properties.RMBFund) {
+                            endRegCapitalRMB = subSegment.end.properties.RMBFund;
+                        }
+                        else if (null == subSegment.end.properties.RMBFund && null != subSegment.end.properties.RMBFund.low) {
+                            endRegCapitalRMB = subSegment.end.properties.RMBFund.low;
+                        }
+                        endRegCapitalRMB = parseFloat(endRegCapitalRMB.toFixed(2));                              //将RMBFund值转换2位小数     
+                        if (null != subSegment.end.properties.regFund) {
+                            endRegCapital = subSegment.end.properties.regFund;
+                        }
+                        else if (null == subSegment.end.properties.regFund && null != subSegment.end.properties.regFund.low) {
+                            endRegCapital = subSegment.end.properties.regFund.low;
+                        }
+                        endRegCapital = parseFloat(endRegCapital.toFixed(2));                                    //将RegFund值转换2位小数   
+                        if (null != subSegment.end.properties.regFundUnit) {
+                            endRegCapitalUnit = subSegment.end.properties.regFundUnit;
+                        }
+                        else if (null == subSegment.end.properties.regFundUnit && null != subSegment.end.properties.regFundUnit.low) {
+                            endRegCapitalUnit = subSegment.end.properties.regFundUnit.low;
+                        }
                     }
-                    else if (!subSegment.end.properties.regFundUnit && subSegment.end.properties.regFundUnit.low) {
-                        endRegCapitalUnit = subSegment.end.properties.regFundUnit.low;
-                    }
+         
                     // let startSegmentName = await queryCodeToName(startSegmentCode);                          //不直接获取eno4j中的ITName，而是通过外部接口由ITCode2获取ITName
                     // let endSegmentName = await queryCodeToName(endSegmentCode);
                     // allNames.push(startSegmentName, endSegmentName);
@@ -905,7 +898,7 @@ function sessionRun2(queryBody) {
 let searchGraph = {
 
     //单个企业直接投资关系路径查询
-    queryDirectInvestPath: async function (code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, personalCode) {
+    queryDirectInvestPath: async function (code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, isPerson) {
         return new Promise(async function (resolve, reject) {
 
             try {
@@ -914,49 +907,55 @@ let searchGraph = {
                 //先从redis中预热的数据中查询是否存在预热值
                 let warmUpKey = [code, DIDepth, lowWeight, highWeight, lowFund, highFund, j, relation].join('-');
                 let warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
-                let cacheKey = [j, code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, personalCode].join('-');
+                let cacheKey = [j, code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus].join('-');
                 if (!warmUpValue) {
                     // let nodeId = await findNodeId(code);
                     let queryBody = null;
-                    let result = {};                                                                      //最终返回的结果
+                    // let result = {};                                                                      //最终返回的结果
                     let directGuaranteePathQuery = null;
                     let directInvestPathQuery = null;
 
                     //for test
                     // surStatus = 0;
 
-                    if (surStatus == 1 || surStatus == '1') {
-                        if (isExtra == 0 || isExtra == '0') {
-                            directGuaranteePathQuery = `match p= (from:company{ITCode2: ${code}})-[r:guarantees]->(to) where from.isExtra = '0' and to.isExtra = '0' return p`;
-                            if (isBranches == 0 || isBranches == '0') {
-                                directInvestPathQuery = `match p= (from:company{ITCode2: ${code}})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0' and from.isBranches = '0' and to.isBranches = '0' and from.surStatus = '1' and to.surStatus = '1') return p`;
+                    if (isPerson == 0) {
+                        if (surStatus == 1 || surStatus == '1') {
+                            if (isExtra == 0 || isExtra == '0') {
+                                directGuaranteePathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:guarantees]->(to) where from.isExtra = '0' and to.isExtra = '0' return p`;
+                                if (isBranches == 0 || isBranches == '0') {
+                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0' and from.isBranches = '0' and to.isBranches = '0' and from.surStatus = '1' and to.surStatus = '1') return p`;
+                                } else {
+                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0' and from.surStatus = '1' and to.surStatus = '1') return p`;
+                                }
                             } else {
-                                directInvestPathQuery = `match p= (from:company{ITCode2: ${code}})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0' and from.surStatus = '1' and to.surStatus = '1') return p`;
+                                directGuaranteePathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:guarantees]->(to) return p`;
+                                if (isBranches == 0 || isBranches == '0') {
+                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isBranches = '0' and to.isBranches = '0' and from.surStatus = '1' and to.surStatus = '1') return p`;
+                                } else {
+                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.surStatus = '1' and to.surStatus = '1') return p`;
+                                }
                             }
                         } else {
-                            directGuaranteePathQuery = `match p= (from:company{ITCode2: ${code}})-[r:guarantees]->(to) return p`;
-                            if (isBranches == 0 || isBranches == '0') {
-                                directInvestPathQuery = `match p= (from:company{ITCode2: ${code}})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isBranches = '0' and to.isBranches = '0' and from.surStatus = '1' and to.surStatus = '1') return p`;
+                            if (isExtra == 0 || isExtra == '0') {
+                                directGuaranteePathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:guarantees]->(to) where from.isExtra = '0' and to.isExtra = '0' return p`;
+                                if (isBranches == 0 || isBranches == '0') {
+                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0' and from.isBranches = '0' and to.isBranches = '0') return p`;
+                                } else {
+                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0') return p`;
+                                }
                             } else {
-                                directInvestPathQuery = `match p= (from:company{ITCode2: ${code}})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.surStatus = '1' and to.surStatus = '1') return p`;
+                                directGuaranteePathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:guarantees]->(to) return p`;
+                                if (isBranches == 0 || isBranches == '0') {
+                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isBranches = '0' and to.isBranches = '0') return p`;
+                                } else {
+                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB}) return p`;
+                                }
                             }
-                        }
-                    } else {
-                        if (isExtra == 0 || isExtra == '0') {
-                            directGuaranteePathQuery = `match p= (from:company{ITCode2: ${code}})-[r:guarantees]->(to) where from.isExtra = '0' and to.isExtra = '0' return p`;
-                            if (isBranches == 0 || isBranches == '0') {
-                                directInvestPathQuery = `match p= (from:company{ITCode2: ${code}})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0' and from.isBranches = '0' and to.isBranches = '0') return p`;
-                            } else {
-                                directInvestPathQuery = `match p= (from:company{ITCode2: ${code}})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0') return p`;
-                            }
-                        } else {
-                            directGuaranteePathQuery = `match p= (from:company{ITCode2: ${code}})-[r:guarantees]->(to) return p`;
-                            if (isBranches == 0 || isBranches == '0') {
-                                directInvestPathQuery = `match p= (from:company{ITCode2: ${code}})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isBranches = '0' and to.isBranches = '0') return p`;
-                            } else {
-                                directInvestPathQuery = `match p= (from:company{ITCode2: ${code}})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB}) return p`;
-                            }
-                        }
+                        }    
+                    }
+                    else if (isPerson == 1) {
+                        directGuaranteePathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:guarantees]->(to) return p`;
+                        directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB}) return p`;
                     }
 
                     if (relation == 'invests') {
@@ -1007,12 +1006,14 @@ let searchGraph = {
                                 let nodeResult = result.pathDetail.data.pathDetail;
                                 if (nodeResult.length > 0) {
                                     let sortTreeResult = null;
-                                    if (!personalCode) {
-                                        sortTreeResult = pathTreeHandlers.fromTreePath1(nodeResult, code, relation);
-                                    }
-                                    else if (personalCode != null) {
-                                        sortTreeResult = pathTreeHandlers.fromTreePath1(nodeResult, personalCode, relation);
-                                    }
+                                    // if (!personalCode) {
+                                    //     sortTreeResult = pathTreeHandlers.fromTreePath1(nodeResult, code, relation);
+                                    // }
+                                    // else if (personalCode != null) {
+                                    //     sortTreeResult = pathTreeHandlers.fromTreePath1(nodeResult, personalCode, relation);
+                                    // }
+                                    sortTreeResult = pathTreeHandlers.fromTreePath1(nodeResult, code, relation);
+
                                     cacheHandlers.setCache(cacheKey, JSON.stringify(sortTreeResult));
                                     //根据预热条件的阈值判断是否要加入预热
                                     let queryCostUp = config.warmUp_Condition.queryNeo4jCost;
@@ -1093,8 +1094,8 @@ let searchGraph = {
                         //     directInvestedByPathQuery = `start from=node(${nodeId}) match p= (from)<-[r:invests*..${DIBDepth}]-(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0') return p`;
                         // }
 
-                        directGuaranteedByPathQuery = `match p= (from:company{ITCode2: ${code}})<-[r:guarantees]-(to) where from.isExtra = '0' and to.isExtra = '0' return p`;
-                        directInvestedByPathQuery = `match p= (from:company{ITCode2: ${code}})<-[r:invests*..${DIBDepth}]-(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0') return p`;
+                        directGuaranteedByPathQuery = `match p= (from:company{ITCode2: '${code}'})<-[r:guarantees]-(to) where from.isExtra = '0' and to.isExtra = '0' return p`;
+                        directInvestedByPathQuery = `match p= (from:company{ITCode2: '${code}'})<-[r:invests*..${DIBDepth}]-(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0') return p`;
                     } else {
                         // if (isBranches == 0 || isBranches == '0') {
                         //     directGuaranteedByPathQuery = `start from=node(${nodeId}) match p= (from)<-[r:guarantees]-(to) where from.isBranches = '0' and to.isBranches = '0' return p`;
@@ -1103,8 +1104,8 @@ let searchGraph = {
                         //     directGuaranteedByPathQuery = `start from=node(${nodeId}) match p= (from)<-[r:guarantees]-(to) return p`;
                         //     directInvestedByPathQuery = `start from=node(${nodeId}) match p= (from)<-[r:invests*..${DIBDepth}]-(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB}) return p`;
                         // }
-                        directGuaranteedByPathQuery = `match p= (from:company{ITCode2: ${code}})<-[r:guarantees]-(to) return p`;
-                        directInvestedByPathQuery = `match p= (from:company{ITCode2: ${code}})<-[r:invests*..${DIBDepth}]-(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB}) return p`;
+                        directGuaranteedByPathQuery = `match p= (from:company{ITCode2: '${code}'})<-[r:guarantees]-(to) return p`;
+                        directInvestedByPathQuery = `match p= (from:company{ITCode2: '${code}'})<-[r:invests*..${DIBDepth}]-(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB}) return p`;
                     }
 
                     if (relation == 'invests') {

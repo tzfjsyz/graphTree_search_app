@@ -1,11 +1,8 @@
 #连接的neo4j server服务器
 neo4jServer:
   url:
-    #bolt://10.10.15.8:7687
-    #bolt://10.17.205.190:7687
-    #bolt://10.15.97.89:7687
-    #bolt://192.168.100.33:7687
-    bolt://10.10.15.27:7688
+    bolt://10.10.15.129:7687
+    #bolt://10.10.15.27:7688
   user:
     neo4j
   password:
@@ -62,8 +59,8 @@ NodeCache:
   redisUrl:                                     #存放paths cache
     redis://:finchina@10.15.97.135:6679/11      #注意：需指定一个独立使用的db, 清空缓存时需要清空db中的所有内容
   autoFlushCache:                               #程序重启是否清空缓存
-    #'true'
-    'fasle'
+    'true'
+    #'fasle'
 
 #redis存储数据的keyName
 redisKeyName:
@@ -117,7 +114,7 @@ lockInfo:
     - redis://:finchina@10.15.97.135:6679/2
     - redis://:finchina@10.15.97.135:6679/3
   resource:
-    - 'lockTimingWarmUpPaths_app'          #为lockTimingWarmUpPaths方法加锁
+    - 'locks:lockTimingWarmUpPaths_app'          #为lockTimingWarmUpPaths方法加锁
   TTL:
     #- 600000
     - 21600000                             #加锁时间, 设置6h

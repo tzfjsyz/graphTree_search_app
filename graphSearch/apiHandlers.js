@@ -253,6 +253,10 @@ async function addQueryDataInfo(code) {
         if (code) {
             console.log('warmUpData  code: ' + code);
             logger.info('warmUpData  code: ' + code);
+            let isPerson = 0; 
+            if (code.indexOf('P') >= 0) {
+                isPerson = 1;
+            }
             //1、先将符合预热条件的数据存到redis中
             let conditionsKey = config.redisKeyName.warmUpITCodes;
             let conditionsField = code;
@@ -263,7 +267,7 @@ async function addQueryDataInfo(code) {
                 if (subMode == 0) {
                     for (let subRelation of conditionsValue.relations) {
                         let relation = subRelation;
-                        await searchGraph.queryDirectInvestPath(code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus);
+                        await searchGraph.queryDirectInvestPath(code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, isPerson);
                     }
                 }
                 else if (subMode == 1) {
@@ -348,17 +352,23 @@ let apiHandlers = {
                 let now = Date.now();
                 console.log('queryDirectInvestPath code:' + code);
                 logger.info('queryDirectInvestPath code:' + code);
-                let isWarmUp = false;
+                // let isWarmUp = false;
                 let queryResult = null;
-                let personalCode = null;
+                // let personalCode = null;
                 //判断code是否自然人的personalCode
-                if (code.slice(0, 1) == 'P') {
-                    personalCode = code;
-                    queryCode = parseInt(code.replace(/P/g, ''));
-                    queryResult = await searchGraph.queryDirectInvestPath(queryCode, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, personalCode);
-                } else {
-                    queryResult = await searchGraph.queryDirectInvestPath(code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, personalCode);
+                // if (code.slice(0, 1) == 'P') {
+                //     personalCode = code;
+                //     queryCode = parseInt(code.replace(/P/g, ''));
+                //     queryResult = await searchGraph.queryDirectInvestPath(queryCode, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, personalCode);
+                // } else {
+                //     queryResult = await searchGraph.queryDirectInvestPath(code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, personalCode);
+                // }
+                let isPerson = 0; 
+                if (code.indexOf('P') >= 0) {
+                    isPerson = 1;
                 }
+                queryResult = await searchGraph.queryDirectInvestPath(code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, isPerson);
+
                 let totalQueryCost = Date.now() - now;
                 logger.info(`${code} queryDirectInvestPath_totalQueryCost: ` + totalQueryCost + 'ms');
                 console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + `, ${code} queryDirectInvestPath_totalQueryCost: ` + totalQueryCost + 'ms');
@@ -536,6 +546,10 @@ let apiHandlers = {
             if (code) {
                 console.log('warmUpData  code: ' + code);
                 logger.info('warmUpData  code: ' + code);
+                let isPerson = 0; 
+                if (code.indexOf('P') >= 0) {
+                    isPerson = 1;
+                }
                 //1、先将符合预热条件的数据存到redis中
                 let conditionsKey = config.redisKeyName.warmUpITCodes;
                 let conditionsField = code;
@@ -546,7 +560,7 @@ let apiHandlers = {
                     if (subMode == 0) {
                         for (let subRelation of conditionsValue.relations) {
                             let relation = subRelation;
-                            await searchGraph.queryDirectInvestPath(code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus);
+                            await searchGraph.queryDirectInvestPath(code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, isPerson);
                         }
                     }
                     else if (subMode == 1) {
