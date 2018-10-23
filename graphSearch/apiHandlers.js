@@ -1,19 +1,15 @@
 /*
 用于API接口信息处理
 wrote by tzf, 2017/12/8
+modified, 2018/10/15
 */
 const searchGraph = require('./searchGraph.js');
 const schedule = require("node-schedule");
 const moment = require('moment');
 const log4js = require('log4js');
-// const Promise = require('bluebird');
 const req = require('require-yml');
 const config = req('./config/source.yml');
-// const path = require('path');
 const cacheHandlers = require('./cacheHandlers.js');
-// const pathTreeHandlers = require('./pathTreeHandlers.js');
-// const getWarmUpQueryData = require('./getWarmUpQueryData.js');
-// const sleep = require('system-sleep');
 const Redis = require('ioredis');
 const redis = new Redis(config.lockInfo.redisUrl[0]);
 const redis1 = new Redis(config.lockInfo.redisUrl[1]);
@@ -70,14 +66,6 @@ function errorResp(err, msg) {
 }
 
 log4js.configure({
-    // appenders: {
-    //     'out': {
-    //         type: 'file',         //文件输出
-    //         filename: 'logs/queryDataInfo.log',
-    //         maxLogSize: config.logInfo.maxLogSize
-    //     }
-    // },
-    // categories: { default: { appenders: ['out'], level: 'info' } }
     appenders: {
         console: {
             type: 'console'
@@ -87,14 +75,16 @@ log4js.configure({
             filename: "./logs/log4js_log-",
             pattern: "yyyy-MM-dd.log",
             alwaysIncludePattern: true,
-            maxLogSize: config.logInfo.maxLogSize
+            maxLogSize: config.logInfo.maxLogSize,
+            backups: 10
         },
         error: {
             type: "dateFile",
             filename: "./logs/log4js_err-",
             pattern: "yyyy-MM-dd.log",
             alwaysIncludePattern: true,
-            maxLogSize: config.logInfo.maxLogSize
+            maxLogSize: config.logInfo.maxLogSize,
+            backups: 10
         },
         errorFilter: {
             type: "logLevelFilter",
@@ -103,12 +93,12 @@ log4js.configure({
         },
     },
     categories: {
-        default: { appenders: ['console', 'log', 'errorFilter'], level: 'info' }
+        default: { appenders: ['console', 'log', 'errorFilter'], level: 'debug' }
     },
     pm2: true,
     pm2InstanceVar: 'INSTANCE_ID'
 });
-const logger = log4js.getLogger('graphTree_search_app');
+const logger = log4js.getLogger('arangodb_search');
 
 //定时主动预热paths
 let rule = new schedule.RecurrenceRule();
@@ -214,16 +204,6 @@ async function addQueryDataInfo(code) {
     else if (!returnNoCodeNodes) {
         isExtra = 1;
     }
-    let lowWeight = config.defaultQueryParams.lowWeight;
-    let highWeight = config.defaultQueryParams.highWeight;
-    if (!lowWeight) lowWeight = 0;
-    if (!highWeight) highWeight = 100;
-    let lowFund = config.defaultQueryParams.lowFund;
-    let highFund = config.defaultQueryParams.highFund;
-    let lowSubAmountRMB = config.defaultQueryParams.lowSubAmountRMB;
-    let highSubAmountRMB = config.defaultQueryParams.highSubAmountRMB;
-    if (!lowSubAmountRMB) lowSubAmountRMB = 0;
-    if (!highSubAmountRMB) highSubAmountRMB = 100000000000000000;
     let isBranches = 0;                                                   //默认isBranches为0，表示查询时过滤分支机构
     let returnBranches = config.defaultQueryParams.returnBranches;
     if (returnBranches && returnBranches == true) {
@@ -253,7 +233,7 @@ async function addQueryDataInfo(code) {
         if (code) {
             console.log('warmUpData  code: ' + code);
             logger.info('warmUpData  code: ' + code);
-            let isPerson = 0; 
+            let isPerson = 0;
             if (code.indexOf('P') >= 0) {
                 isPerson = 1;
             }
@@ -308,20 +288,15 @@ let apiHandlers = {
         let returnBranches = request.query.returnBranches;                 //是否返回分支机构
         let surStatus = request.query.surStatus;                           //公司续存状态
         if (!surStatus) surStatus = 1;                                     //默认surStatus为1 
-
         if (lowWeight) lowWeight = parseFloat(lowWeight);
         if (highWeight) highWeight = parseFloat(highWeight);
         if (lowFund) lowFund = parseFloat(lowFund);
         if (highFund) highFund = parseFloat(highFund);
         if (lowSubAmountRMB) lowSubAmountRMB = parseFloat(lowSubAmountRMB);
         if (highSubAmountRMB) highSubAmountRMB = parseFloat(highSubAmountRMB);
-        if (!lowWeight) lowWeight = 0;                                     //默认最低投资比例为0
-        if (!highWeight) highWeight = 100;                                 //默认最高投资比例为100
         if (!DIDepth) DIDepth = 2;
         if (!relation) relation = 'invests';                               //默认invests关系
         let isExtra = 0;                                                   //默认isExtra为0,表示查询时过滤没有机构代码的节点
-        if (!lowSubAmountRMB) lowSubAmountRMB = 0;                         //默认最低投资比例为0
-        if (!highSubAmountRMB) highSubAmountRMB = 100000000000000000;      //默认最低投资比例为100000000000000000
         if (returnNoCodeNodes == "false" || !returnNoCodeNodes) {          //不返回无机构代码的nodes, 即isExtra=0的nodes
             isExtra = 0;
         } else if (returnNoCodeNodes == "true") {                          //返回无机构代码的nodes, 即isExtra=1和isExtra=0的nodes
@@ -352,18 +327,9 @@ let apiHandlers = {
                 let now = Date.now();
                 console.log('queryDirectInvestPath code:' + code);
                 logger.info('queryDirectInvestPath code:' + code);
-                // let isWarmUp = false;
                 let queryResult = null;
-                // let personalCode = null;
                 //判断code是否自然人的personalCode
-                // if (code.slice(0, 1) == 'P') {
-                //     personalCode = code;
-                //     queryCode = parseInt(code.replace(/P/g, ''));
-                //     queryResult = await searchGraph.queryDirectInvestPath(queryCode, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, personalCode);
-                // } else {
-                //     queryResult = await searchGraph.queryDirectInvestPath(code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus, personalCode);
-                // }
-                let isPerson = 0; 
+                let isPerson = 0;
                 if (code.indexOf('P') >= 0) {
                     isPerson = 1;
                 }
@@ -409,7 +375,7 @@ let apiHandlers = {
         let returnNoCodeNodes = request.query.returnNoCodeNodes;           //是否带入没有机构代码的节点查询
         let lowSubAmountRMB = request.query.lowSubAmountRMB;               //最低认缴金额
         let highSubAmountRMB = request.query.highSubAmountRMB;             //最高认缴金额
-        let returnBranches = request.query.returnBranches;                 //是否返回分支机构
+        // let returnBranches = request.query.returnBranches;                 //是否返回分支机构
         // let surStatus = request.query.surStatus;                           //公司续存状态
         // if (!surStatus) surStatus = 1;                                     //默认surStatus为1 
         if (lowWeight) lowWeight = parseFloat(lowWeight);
@@ -418,13 +384,9 @@ let apiHandlers = {
         if (highFund) highFund = parseFloat(highFund);
         if (lowSubAmountRMB) lowSubAmountRMB = parseFloat(lowSubAmountRMB);
         if (highSubAmountRMB) highSubAmountRMB = parseFloat(highSubAmountRMB);
-        if (!lowWeight) lowWeight = 0;                                     //默认最低投资比例为0
-        if (!highWeight) highWeight = 100;                                 //默认最高投资比例为100
         if (!DIBDepth) DIBDepth = 2;
         if (!relation) relation = 'invests';                               //默认invests关系
         let isExtra = 0;                                                   //默认isExtra为0,表示查询时过滤没有机构代码的节点
-        if (!lowSubAmountRMB) lowSubAmountRMB = 0;                         //默认最低投资比例为0
-        if (!highSubAmountRMB) highSubAmountRMB = 100000000000000000;      //默认最低投资比例为100000000000000000
         if (returnNoCodeNodes == "false" || !returnNoCodeNodes) {          //不返回无机构代码的nodes, 即isExtra=0的nodes
             isExtra = 0;
         } else if (returnNoCodeNodes == "true") {                            //返回无机构代码的nodes, 即isExtra=1和isExtra=0的nodes
@@ -432,14 +394,14 @@ let apiHandlers = {
         } else {
             isExtra = 0;
         }
-        let isBranches = 0;                                               //默认isBranches为0，表示查询时过滤分支机构
-        if (returnBranches == "false" || !returnBranches) {
-            isBranches = 0;
-        } else if (returnBranches == "true") {
-            isBranches = 1;
-        } else {
-            isBranches = 0;
-        }
+        // let isBranches = 0;                                               //默认isBranches为0，表示查询时过滤分支机构
+        // if (returnBranches == "false" || !returnBranches) {
+        //     isBranches = 0;
+        // } else if (returnBranches == "true") {
+        //     isBranches = 1;
+        // } else {
+        //     isBranches = 0;
+        // }
 
         try {
             if (lowWeight && highWeight && lowWeight > highWeight) {
@@ -455,7 +417,7 @@ let apiHandlers = {
                 let now = Date.now();
                 console.log('queryDirectInvestedByPath code:' + code);
                 logger.info('queryDirectInvestedByPath code:' + code);
-                let queryResult = await searchGraph.queryDirectInvestedByPath(code, relation, DIBDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches);
+                let queryResult = await searchGraph.queryDirectInvestedByPath(code, relation, DIBDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra);
                 let totalQueryCost = Date.now() - now;
                 logger.info(`${code} queryDirectInvestedByPath_totalQueryCost: ` + totalQueryCost + 'ms');
                 console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + `, ${code} queryDirectInvestedByPath_totalQueryCost: ` + totalQueryCost + 'ms');
@@ -478,6 +440,483 @@ let apiHandlers = {
 
             } else if (!code) {
                 return reply.response(errorResp(errorCode.ARG_ERROR, `缺少code参数!`));
+            }
+
+        } catch (err) {
+            return reply.response(err);
+        }
+    },
+
+    //直接投资关系路径
+    queryInvestPathInfo: async function (request, reply) {
+        let codeOne = request.query.from;
+        let codeTwo = request.query.to;
+        let IVDepth = request.query.investPathDepth;
+        let lowWeight = request.query.lowWeight;                           //最低投资比例
+        let highWeight = request.query.highWeight;                         //最高投资比例
+        if (lowWeight) lowWeight = parseFloat(lowWeight);
+        if (highWeight) highWeight = parseFloat(highWeight);
+        if (!IVDepth) IVDepth = config.pathDepth.IVDepth;
+        let pathType = request.query.pathType;                             //默认返回的路径方式为invests
+        if (!pathType) pathType = 'invests';
+        let user = request.query.username;                                 //调用接口的用户信息
+        let depth = parseInt(request.query.depth);                         //对外接口传入的字段
+        if (!isNaN(depth)) {
+            if (depth > config.pathDepth.IVDepth) {
+                depth = config.pathDepth.IVDepth;
+            }
+            IVDepth = depth;
+        }
+        if (!user) {
+            user = 'unknown';
+        }
+        try {
+            if (lowWeight && highWeight && lowWeight > highWeight) {
+                return reply.response({ ok: -1, message: 'highWeight must >= lowWeight!' });
+            }
+            let res = null;
+            if (codeOne && codeTwo) {
+                if (codeOne == codeTwo) {
+                    console.error('from can not be same as to!');
+                    logger.error('from can not be same as to!');
+                    return reply.response(errorResp(errorCode.ARG_ERROR, 'from/to参数不能相同!'));
+                }
+                else if (codeOne != codeTwo) {
+                    let now = Date.now();
+                    console.log('user: ' + user + ', queryInvestPath  from: ' + codeOne + ', to: ' + codeTwo);
+                    logger.info('user: ' + user + ', queryInvestPath  from: ' + codeOne + ', to: ' + codeTwo);
+                    searchGraph.queryInvestPath(codeOne, codeTwo, IVDepth, lowWeight, highWeight, pathType)
+                        .then(res => {
+                            let totalQueryCost = Date.now() - now;
+                            logger.info(`user: ${user}, from: ${codeOne} to: ${codeTwo}` + " queryInvestPath_totalQueryCost: " + totalQueryCost + 'ms');
+                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ` user: ${user}, from: ${codeOne} to: ${codeTwo}` + ", queryInvestPath_totalQueryCost: " + totalQueryCost + 'ms');
+                            if (!isNaN(depth)) {                                                      //depth不为空时做数据重新封装
+                                let newRes = pathHandlers.dataProcess(res);
+                                return reply.response({ direction: { from: codeOne, to: codeTwo }, results: newRes });
+                            }
+                            else {
+                                if (!res) {
+                                    return reply.response({ direction: { from: codeOne, to: codeTwo }, results: { pathTypeOne: "no results!", pathTypeTwo: "no results!", pathTypeThree: "no results!" } });
+                                }
+                                else if (res) {
+                                    return reply.response({ direction: { from: codeOne, to: codeTwo }, results: { pathTypeOne: res.nodeResultOne.pathDetail, pathTypeTwo: res.nodeResultTwo.pathDetail, pathTypeThree: res.nodeResultThree.pathDetail } });
+                                }
+                            }
+                        }).catch(err => {
+                            return reply.response({ ok: -1, message: err.message || err });
+                        });
+                }
+            } else if (!codeOne && codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少from参数!`));
+            } else if (codeOne && !codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少to参数!`));
+            } else if (!codeOne && !codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少from和to参数!`));
+            }
+
+        } catch (err) {
+            return reply.response(err);
+        }
+    },
+
+    //直接被投资关系路径
+    queryInvestedByPathInfo: async function (request, reply) {
+        let codeOne = request.query.from;
+        let codeTwo = request.query.to;
+        let IVBDepth = request.query.investedByPathDepth;
+        let lowWeight = request.query.lowWeight;                           //最低投资比例
+        let highWeight = request.query.highWeight;                         //最高投资比例
+        if (lowWeight) lowWeight = parseFloat(lowWeight);
+        if (highWeight) highWeight = parseFloat(highWeight);
+        if (!IVBDepth) IVBDepth = config.pathDepth.IVBDepth;
+        let pathType = request.query.pathType;                             //默认返回的路径方式为invests
+        if (!pathType) pathType = 'invests';
+        let user = request.query.username;                                 //调用接口的用户信息
+        let depth = parseInt(request.query.depth);                         //对外接口传入的字段
+        if (!isNaN(depth)) {
+            if (depth > config.pathDepth.IVBDepth) {
+                depth = config.pathDepth.IVBDepth;
+            }
+            IVBDepth = depth;
+        }
+        if (!user) {
+            user = 'unknown';
+        }
+        try {
+            if (lowWeight && highWeight && lowWeight > highWeight) {
+                return reply.response({ ok: -1, message: 'highWeight must >= lowWeight!' });
+            }
+            let res = null;
+            if (codeOne && codeTwo) {
+                if (codeOne == codeTwo) {
+                    console.error('from can not be same as to!');
+                    logger.error('from can not be same as to!');
+                    return reply.response(errorResp(errorCode.ARG_ERROR, 'from/to参数不能相同!'));
+                }
+                else if (codeOne != codeTwo) {
+                    let now = Date.now();
+                    console.log('user: ' + user + ', queryInvestedByPath  from: ' + codeOne + ', to: ' + codeTwo);
+                    logger.info('user: ' + user + ', queryInvestedByPath  from: ' + codeOne + ', to: ' + codeTwo);
+                    searchGraph.queryInvestedByPath(codeOne, codeTwo, IVBDepth, lowWeight, highWeight, pathType)
+                        .then(res => {
+                            let totalQueryCost = Date.now() - now;
+                            logger.info(`user: ${user}, from: ${codeOne} to: ${codeTwo}` + " queryInvestedByPath_totalQueryCost: " + totalQueryCost + 'ms');
+                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ` user: ${user}, from: ${codeOne} to: ${codeTwo}` + ", queryInvestedByPath_totalQueryCost: " + totalQueryCost + 'ms');
+                            if (!isNaN(depth)) {                                                      //depth不为空时做数据重新封装
+                                let newRes = pathHandlers.dataProcess(res);
+                                return reply.response({ direction: { from: codeOne, to: codeTwo }, results: newRes });
+                            }
+                            else {
+                                if (!res) {
+                                    return reply.response({ direction: { from: codeOne, to: codeTwo }, results: { pathTypeOne: "no results!", pathTypeTwo: "no results!", pathTypeThree: "no results!" } });
+                                }
+                                else if (res) {
+                                    // let totalPathNum = res.pathDetail.data.pathNum;
+                                    // console.log(`from: ${codeOne} to: ${codeTwo}`+ ' queryInvestPath_totalPathNum: ' + totalPathNum);
+                                    // logger.info(`from: ${codeOne} to: ${codeTwo}`+ ' queryInvestPath_totalPathNum: ' + totalPathNum);
+                                    return reply.response({ direction: { from: codeOne, to: codeTwo }, results: { pathTypeOne: res.nodeResultOne.pathDetail, pathTypeTwo: res.nodeResultTwo.pathDetail, pathTypeThree: res.nodeResultThree.pathDetail } });
+                                }
+                            }
+                        }).catch(err => {
+                            return reply.response({ ok: -1, message: err.message || err });
+                        });
+                }
+            } else if (!codeOne && codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少from参数!`));
+            } else if (codeOne && !codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少to参数!`));
+            } else if (!codeOne && !codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少from和to参数!`));
+            }
+
+        } catch (err) {
+            return reply.response(err);
+        }
+    },
+
+    //共同投资关系路径
+    queryCommonInvestPathInfo: async function (request, reply) {
+        let codeOne = request.query.from;
+        let codeTwo = request.query.to;
+        let CIVDepth = request.query.comInvestPathDepth;
+        let lowWeight = request.query.lowWeight;                           //最低投资比例
+        let highWeight = request.query.highWeight;                         //最高投资比例
+        if (lowWeight) lowWeight = parseFloat(lowWeight);
+        if (highWeight) highWeight = parseFloat(highWeight);
+        if (!CIVDepth) CIVDepth = config.pathDepth.CIVDepth;
+        let pathType = request.query.pathType;                             //默认返回的路径方式为invests
+        if (!pathType) pathType = 'invests';
+        let user = request.query.username;                                 //调用接口的用户信息
+        let depth = parseInt(request.query.depth);                         //对外接口传入的字段
+        if (!isNaN(depth)) {
+            if (depth >  config.pathDepth.CIVDepth) {
+                depth =  config.pathDepth.CIVDepth;
+            }
+            CIVDepth = depth;
+        }
+        if (!user) {
+            user = 'unknown';
+        }
+        try {
+            if (lowWeight && highWeight && lowWeight > highWeight) {
+                return reply.response({ ok: -1, message: 'highWeight must >= lowWeight!' });
+            }
+            let res = null;
+            if (codeOne && codeTwo) {
+                if (codeOne == codeTwo) {
+                    console.error('from can not be same as to!');
+                    logger.error('from can not be same as to!');
+                    return reply.response(errorResp(errorCode.ARG_ERROR, 'from/to参数不能相同!'));
+                }
+                else if (codeOne != codeTwo) {
+                    let now = Date.now();
+                    console.log('user: ' + user + ', queryCommonInvestPath  from: ' + codeOne + ', to: ' + codeTwo);
+                    logger.info('user: ' + user + ', queryCommonInvestPath  from: ' + codeOne + ', to: ' + codeTwo);
+                    searchGraph.queryCommonInvestPath(codeOne, codeTwo, CIVDepth, lowWeight, highWeight, pathType)
+                        .then(res => {
+                            let totalQueryCost = Date.now() - now;
+                            logger.info(`user: ${user}, from: ${codeOne} to: ${codeTwo}` + " queryCommonInvestPath_totalQueryCost: " + totalQueryCost + 'ms');
+                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ` user: ${user}, from: ${codeOne} to: ${codeTwo}` + ", queryCommonInvestPath_totalQueryCost: " + totalQueryCost + 'ms');
+                            if (!isNaN(depth)) {                                                      //depth不为空时做数据重新封装
+                                let newRes = pathHandlers.dataProcess(res);
+                                return reply.response({ direction: { from: codeOne, to: codeTwo }, results: newRes });
+                            }
+                            else {
+                                if (!res) {
+                                    return reply.response({ direction: { from: codeOne, to: codeTwo }, results: { pathTypeOne: "no results!", pathTypeTwo: "no results!", pathTypeThree: "no results!" } });
+                                }
+                                else if (res) {
+                                    return reply.response({ direction: { from: codeOne, to: codeTwo }, results: { pathTypeOne: res.nodeResultOne.pathDetail, pathTypeTwo: res.nodeResultTwo.pathDetail, pathTypeThree: res.nodeResultThree.pathDetail } });
+                                }
+                            }
+                        }).catch(err => {
+                            return reply.response({ ok: -1, message: err.message || err });
+                        });
+                }
+            } else if (!codeOne && codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少from参数!`));
+            } else if (codeOne && !codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少to参数!`));
+            } else if (!codeOne && !codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少from和to参数!`));
+            }
+
+        } catch (err) {
+            return reply.response(err);
+        }
+    },
+
+    //共同被投资关系路径
+    queryCommonInvestedByPathInfo: async function (request, reply) {
+        let codeOne = request.query.from;
+        let codeTwo = request.query.to;
+        let CIVBDepth = request.query.comInvestedByPathDepth;
+        let lowWeight = request.query.lowWeight;                           //最低投资比例
+        let highWeight = request.query.highWeight;                         //最高投资比例
+        if (lowWeight) lowWeight = parseFloat(lowWeight);
+        if (highWeight) highWeight = parseFloat(highWeight);
+        if (!CIVBDepth) CIVBDepth = config.pathDepth.CIVBDepth;
+        let returnNoCodeNodes = request.query.returnNoCodeNodes;           //是否带入没有机构代码的节点查询
+        if (returnNoCodeNodes == "false" || !returnNoCodeNodes) {          //不返回无机构代码的nodes, 即isExtra=0的nodes
+            isExtra = 0;
+        } else if (returnNoCodeNodes == "true") {                          //返回无机构代码的nodes, 即isExtra=1和isExtra=0的nodes
+            isExtra = 1;
+        } else {
+            isExtra = 0;
+        }
+        let pathType = request.query.pathType;                             //默认返回的路径方式为invests
+        if (!pathType) pathType = 'invests';
+        let user = request.query.username;                                 //调用接口的用户信息
+        let depth = parseInt(request.query.depth);                         //对外接口传入的字段
+        if (!isNaN(depth)) {
+            if (depth >  config.pathDepth.CIVBDepth) {
+                depth =  config.pathDepth.CIVBDepth;
+            }
+            CIVBDepth = depth;
+            isExtra = 1;
+        }
+        if (!user) {
+            user = 'unknown';
+        }
+        try {
+            if (lowWeight && highWeight && lowWeight > highWeight) {
+                return reply.response({ ok: -1, message: 'highWeight must >= lowWeight!' });
+            }
+            let res = null;
+            if (codeOne && codeTwo) {
+                if (codeOne == codeTwo) {
+                    console.error('from can not be same as to!');
+                    logger.error('from can not be same as to!');
+                    return reply.response(errorResp(errorCode.ARG_ERROR, 'from/to参数不能相同!'));
+                }
+                else if (codeOne != codeTwo) {
+                    let now = Date.now();
+                    console.log('user: ' + user + ', queryCommonInvestedByPath  from: ' + codeOne + ', to: ' + codeTwo);
+                    logger.info('user: ' + user + ', queryCommonInvestedByPath  from: ' + codeOne + ', to: ' + codeTwo);
+                    searchGraph.queryCommonInvestedByPath(codeOne, codeTwo, CIVBDepth, lowWeight, highWeight, isExtra, pathType)
+                        .then(res => {
+                            let totalQueryCost = Date.now() - now;
+                            logger.info(`user: ${user}, from: ${codeOne} to: ${codeTwo}` + " queryCommonInvestedByPath_totalQueryCost: " + totalQueryCost + 'ms');
+                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ` user: ${user}, from: ${codeOne} to: ${codeTwo}` + ", queryCommonInvestedByPath_totalQueryCost: " + totalQueryCost + 'ms');
+                            if (!isNaN(depth)) {                                                      //depth不为空时做数据重新封装
+                                let newRes = pathHandlers.dataProcess(res);
+                                return reply.response({ direction: { from: codeOne, to: codeTwo }, results: newRes });
+                            }
+                            else {
+                                if (!res) {
+                                    return reply.response({ direction: { from: codeOne, to: codeTwo }, results: { pathTypeOne: "no results!", pathTypeTwo: "no results!", pathTypeThree: "no results!" } });
+                                }
+                                else if (res) {
+                                    return reply.response({ direction: { from: codeOne, to: codeTwo }, results: { pathTypeOne: res.nodeResultOne.pathDetail, pathTypeTwo: res.nodeResultTwo.pathDetail, pathTypeThree: res.nodeResultThree.pathDetail } });
+                                }
+                            }
+                        }).catch(err => {
+                            return reply.response({ ok: -1, message: err.message || err });
+                        });
+                }
+            } else if (!codeOne && codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少from参数!`));
+            } else if (codeOne && !codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少to参数!`));
+            } else if (!codeOne && !codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少from和to参数!`));
+            }
+
+        } catch (err) {
+            return reply.response(err);
+        }
+    },
+
+    //高管投资关系路径查询
+    queryExecutiveInvestPathInfo: async function (request, reply) {
+        let code = request.query.personalCode;
+        let user = request.query.username;                                 //调用接口的用户信息
+        if (!user) {
+            user = 'unknown';
+        }
+        let surStatus = request.query.surStatus;                           //公司续存状态
+        if (!surStatus) surStatus = 0;                                     //默认surStatus为0 
+        try {
+            let res = null;
+            if (code.indexOf('P') < 0) {
+                return reply.response({ ok: -1, message: 'input code is not the personalCode, please check it!' });
+            }
+            else if (code.indexOf('P') >= 0) {
+                let now = Date.now();
+                console.log(`user: ${user}`+ ', queryExecutiveInvestPath  code: ' + code);
+                logger.info(`user: ${user}`+ ', queryExecutiveInvestPath  code: ' + code);
+                searchGraph.queryExecutiveInvestPath(code, surStatus)
+                    .then(res => {
+                        let totalQueryCost = Date.now() - now;
+                        logger.info(`user: ${user}`+", queryExecutiveInvestPath_totalQueryCost: " + totalQueryCost + 'ms');
+                        console.log("time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") +`user: ${user}`+ ", queryExecutiveInvestPath_totalQueryCost: " + totalQueryCost + 'ms');
+
+                        if (!res) {
+                            return reply.response({ code: code, results: "no results!" });
+                        }
+                        else if (res) {
+                            let totalPathNum = res.data.pathNum;
+                            console.log('queryExecutiveInvestPath_totalPathNum: ' + totalPathNum);
+                            logger.info('queryExecutiveInvestPath_totalPathNum: ' + totalPathNum);
+                            return reply.response({ code: code, results: res });
+                        }
+                    }).catch(err => {
+                        return reply.response({ ok: -1, message: err.message || err });
+                    });
+            } else if (!code) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少code参数!`));
+            }
+        } catch (err) {
+            return reply.response(err);
+        }
+    },
+
+    //担保关系路径
+    queryGuaranteePathInfo: async function (request, reply) {
+        let codeOne = request.query.from;
+        let codeTwo = request.query.to;
+        let GTDepth = request.query.guaranteePathDepth;
+        if (!GTDepth) GTDepth = config.pathDepth.GTDepth;
+        let user = request.query.username;                                 //调用接口的用户信息
+        if (!user) {
+            user = 'unknown';
+        }
+        let depth = parseInt(request.query.depth);                         //对外接口传入的字段
+        if (!isNaN(depth)) {
+            if (depth >  config.pathDepth.GTDepth) {
+                depth =  config.pathDepth.GTDepth;
+            }
+            GTDepth = depth;
+        }
+        try {
+            let res = null;
+            if (codeOne && codeTwo) {
+                if (codeOne == codeTwo) {
+                    console.error('from can not be same as to!');
+                    logger.error('from can not be same as to!');
+                    return reply.response(errorResp(errorCode.ARG_ERROR, 'from/to参数不能相同!'));
+                }
+                else if (codeOne != codeTwo) {
+                    let now = Date.now();
+                    console.log('user: ' + user + ', queryGuaranteePath  from: ' + codeOne + ', to: ' + codeTwo);
+                    logger.info('user: ' + user + ', queryGuaranteePath  from: ' + codeOne + ', to: ' + codeTwo);
+                    searchGraph.queryGuaranteePath(codeOne, codeTwo, GTDepth)
+                        .then(res => {
+                            let totalQueryCost = Date.now() - now;
+                            logger.info(`user: ${user}, from: ${codeOne} to: ${codeTwo}` + " queryGuaranteePath_totalQueryCost: " + totalQueryCost + 'ms');
+                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ` user: ${user}, from: ${codeOne} to: ${codeTwo}` + ", queryGuaranteePath_totalQueryCost: " + totalQueryCost + 'ms');
+                            if (!isNaN(depth)) {                                                      //depth不为空时做数据重新封装
+                                let newRes = pathHandlers.dataProcess2(res);
+                                return reply.response({ direction: { from: codeOne, to: codeTwo }, results: newRes });
+                            }
+                            else {
+                                if (!res) {
+                                    return reply.response({ direction: { from: codeOne, to: codeTwo }, results: "no results!" });
+                                }
+                                else if (res) {
+                                    let totalPathNum = res.nodeResultTwo.pathDetail.data.pathNum;
+                                    console.log(`from: ${codeOne} to: ${codeTwo}` + ' queryGuaranteePath_totalPathNum: ' + totalPathNum);
+                                    logger.info(`from: ${codeOne} to: ${codeTwo}` + ' queryGuaranteePath_totalPathNum: ' + totalPathNum);
+                                    return reply.response({ direction: { from: codeOne, to: codeTwo }, results: res.nodeResultTwo.pathDetail });
+                                }
+                            }
+                        }).catch(err => {
+                            return reply.response({ ok: -1, message: err.message || err });
+                        });
+                }
+            } else if (!codeOne && codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少from参数!`));
+            } else if (codeOne && !codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少to参数!`));
+            } else if (!codeOne && !codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少from和to参数!`));
+            }
+
+        } catch (err) {
+            return reply.response(err);
+        }
+    },
+
+    //被担保关系路径
+    queryGuaranteedByPathInfo: async function (request, reply) {
+        let codeOne = request.query.from;
+        let codeTwo = request.query.to;
+        let GTBDepth = request.query.guaranteedByPathDepth;
+        if (!GTBDepth) GTBDepth = config.pathDepth.GTBDepth;
+        let user = request.query.username;                                 //调用接口的用户信息
+        if (!user) {
+            user = 'unknown';
+        }
+        let depth = parseInt(request.query.depth);                         //对外接口传入的字段
+        if (!isNaN(depth)) {
+            if (depth >  config.pathDepth.GTBDepth) {
+                depth =  config.pathDepth.GTBDepth;
+            }
+            GTBDepth = depth;
+        }
+        try {
+            let res = null;
+            if (codeOne && codeTwo) {
+                if (codeOne == codeTwo) {
+                    console.error('from can not be same as to!');
+                    logger.error('from can not be same as to!');
+                    return reply.response(errorResp(errorCode.ARG_ERROR, 'from/to参数不能相同!'));
+                }
+                else if (codeOne != codeTwo) {
+                    let now = Date.now();
+                    console.log('user: ' + user + ', queryGuaranteeedByPath  from: ' + codeOne + ', to: ' + codeTwo);
+                    logger.info('user: ' + user + ', queryGuaranteedByPath  from: ' + codeOne + ', to: ' + codeTwo);
+                    searchGraph.queryGuaranteedByPath(codeOne, codeTwo, GTBDepth)
+                        .then(res => {
+                            let totalQueryCost = Date.now() - now;
+                            logger.info(`user: ${user}, from: ${codeOne} to: ${codeTwo}` + " queryGuaranteeedByPath_totalQueryCost: " + totalQueryCost + 'ms');
+                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ` user: ${user}, from: ${codeOne} to: ${codeTwo}` + ", queryGuaranteeedByPath_totalQueryCost: " + totalQueryCost + 'ms');
+                            if (!isNaN(depth)) {                                                      //depth不为空时做数据重新封装
+                                let newRes = pathHandlers.dataProcess2(res);
+                                return reply.response({ direction: { from: codeOne, to: codeTwo }, results: newRes });
+                            }
+                            else {
+                                if (!res) {
+                                    return reply.response({ direction: { from: codeOne, to: codeTwo }, results: "no results!" });
+                                }
+                                else if (res) {
+                                    let totalPathNum = res.nodeResultTwo.pathDetail.data.pathNum;
+                                    console.log(`from: ${codeOne} to: ${codeTwo}` + ' queryGuaranteeedByPath_totalPathNum: ' + totalPathNum);
+                                    logger.info(`from: ${codeOne} to: ${codeTwo}` + ' queryGuaranteeedByPath_totalPathNum: ' + totalPathNum);
+                                    return reply.response({ direction: { from: codeOne, to: codeTwo }, results: res.nodeResultTwo.pathDetail });
+                                }
+                            }
+
+                        }).catch(err => {
+                            return reply.response({ ok: -1, message: err.message || err });
+                        });
+                }
+            } else if (!codeOne && codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少from参数!`));
+            } else if (codeOne && !codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少to参数!`));
+            } else if (!codeOne && !codeTwo) {
+                return reply.response(errorResp(errorCode.ARG_ERROR, `缺少from和to参数!`));
             }
 
         } catch (err) {
@@ -510,16 +949,6 @@ let apiHandlers = {
         else if (!returnNoCodeNodes) {
             isExtra = 1;
         }
-        let lowWeight = config.defaultQueryParams.lowWeight;
-        let highWeight = config.defaultQueryParams.highWeight;
-        if (!lowWeight) lowWeight = 0;
-        if (!highWeight) highWeight = 100;
-        let lowFund = config.defaultQueryParams.lowFund;
-        let highFund = config.defaultQueryParams.highFund;
-        let lowSubAmountRMB = config.defaultQueryParams.lowSubAmountRMB;
-        let highSubAmountRMB = config.defaultQueryParams.highSubAmountRMB;
-        if (!lowSubAmountRMB) lowSubAmountRMB = 0;
-        if (!highSubAmountRMB) highSubAmountRMB = 100000000000000000;
         let isBranches = 0;                                                   //默认isBranches为0，表示查询时过滤分支机构
         let returnBranches = config.defaultQueryParams.returnBranches;
         if (returnBranches && returnBranches == true) {
@@ -546,7 +975,7 @@ let apiHandlers = {
             if (code) {
                 console.log('warmUpData  code: ' + code);
                 logger.info('warmUpData  code: ' + code);
-                let isPerson = 0; 
+                let isPerson = 0;
                 if (code.indexOf('P') >= 0) {
                     isPerson = 1;
                 }
@@ -606,16 +1035,6 @@ let apiHandlers = {
         else if (!returnNoCodeNodes) {
             isExtra = 1;
         }
-        let lowWeight = config.defaultQueryParams.lowWeight;
-        let highWeight = config.defaultQueryParams.highWeight;
-        if (!lowWeight) lowWeight = 0;
-        if (!highWeight) highWeight = 100;
-        let lowFund = config.defaultQueryParams.lowFund;
-        let highFund = config.defaultQueryParams.highFund;
-        let lowSubAmountRMB = config.defaultQueryParams.lowSubAmountRMB;
-        let highSubAmountRMB = config.defaultQueryParams.highSubAmountRMB;
-        if (!lowSubAmountRMB) lowSubAmountRMB = 0;
-        if (!highSubAmountRMB) highSubAmountRMB = 100000000000000000;
         let isBranches = 0;                                                   //默认isBranches为0，表示查询时过滤分支机构
         let returnBranches = config.defaultQueryParams.returnBranches;
         if (returnBranches && returnBranches == true) {

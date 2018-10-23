@@ -1,8 +1,8 @@
 {
     "apps": [
         {
-          "name": "graphTree_search_app",
-          "script": "graphTree_search_app.js",
+          "name": "arangodb_search",
+          "script": "arangodb_search.js",
           "error_file": "./logs/pm2Cluster_err.log",
           "out_file": "./logs/pm2Cluster_out.log",
           "merge_logs": true,
@@ -15,8 +15,8 @@
           }
         },
         {
-          "name": "graphTree_search_app",
-          "script": "graphTree_search_app.js",
+          "name": "arangodb_search",
+          "script": "arangodb_search.js",
           "error_file": "./logs/pm2Cluster_err.log",
           "out_file": "./logs/pm2Cluster_out.log",
           "merge_logs": true,

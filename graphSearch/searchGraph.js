@@ -2,84 +2,28 @@
 用于企业关联关系信息查询
 wrote by tzf, 2017/12/8
 */
-const cacheHandlers = require('./cacheHandlers.js');
+const req = require('require-yml');
+const config = req("./config/source.yml");
 const pathTreeHandlers = require('./pathTreeHandlers.js');
-const req = require('require-yml')
-const config = req("config/source.yml");
-const Hapi = require('hapi');
-const server = new Hapi.Server();
-const http = require('http');
-const querystring = require('querystring');
-const url = require('url');
-const express = require('express');
-const bodyParser = require('body-parser');
-const request = require('request');
-const fs = require("fs-extra");
 const moment = require('moment');
 const log4js = require('log4js');
-// const Promise = require('bluebird');
-const neo4j = require('neo4j-driver').v1;
-const driver = neo4j.driver(`${config.neo4jServer.url}`, neo4j.auth.basic(`${config.neo4jServer.user}`, `${config.neo4jServer.password}`),
-    // {
-    //     maxConnectionLifetime: 30 * 60 * 60,
-    //     maxConnectionPoolSize: 1000,
-    //     connectionTimeout: 2 * 60
-    // }
-);
 const lookupTimeout = config.lookupTimeout;
 console.log('lookupTimeout: ' + lookupTimeout + 'ms');
 const schedule = require("node-schedule");
+const resultHandlers = require('./resultHandlers.js');
+const cacheHandlers = require('./cacheHandlers.js');
+const arangojs = require("arangojs");
+const db = new arangojs.Database({
+    url: config.arangodbInfo.url,
 
-// let rule = new schedule.RecurrenceRule();
-// rule.second = 0;
-// schedule.scheduleJob(rule, async function(){
-//     let result = await callNeo4jServer();
-//    console.log(moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") +' callNeo4jServerResult ITCode: ' +result);
-// });
+});
+db.useDatabase(config.arangodbInfo.databaseName);
 
-const errorCode = {
-    ARG_ERROR: {
-        code: -100,
-        msg: "请求参数错误"
-    },
-    NOTSUPPORT: {
-        code: -101,
-        msg: "不支持的参数"
-    },
-    INTERNALERROR: {
-        code: -200,
-        msg: "服务内部错误"
-    },
-    NOMATCHINGDATA: {
-        code: -505,
-        msg: "无匹配数据"
-    }
-}
+const warmUpSwitch = config.warmUp_RedisInfo.switch;
+const cacheSwitch = config.NodeCache.switch;
+console.log(`warmUpSwitch: ${warmUpSwitch}, cacheSwitch: ${cacheSwitch}`);
 
-function errorResp(err, msg) {
-    return { ok: err.code, error: msg || err.msg };
-}
-
-// log4js.configure({
-//     appenders: {
-//         'out': {
-//             type: 'file',         //文件输出
-//             filename: 'logs/queryDataInfo.log',
-//             maxLogSize: config.logInfo.maxLogSize
-//         }
-//     },
-//     categories: { default: { appenders: ['out'], level: 'info' } }
-// });
-// const logger = log4js.getLogger();
 log4js.configure({
-    // appenders: {
-    //     'out': {
-    //         type: 'file',         //文件输出
-    //         filename: 'logs/queryDataInfo.log',
-    //         maxLogSize: config.logInfo.maxLogSize
-    //     }
-    // },
-    // categories: { default: { appenders: ['out'], level: 'info' } }
     appenders: {
         console: {
             type: 'console'
@@ -89,14 +33,16 @@ log4js.configure({
             filename: "./logs/log4js_log-",
             pattern: "yyyy-MM-dd.log",
             alwaysIncludePattern: true,
-            maxLogSize: config.logInfo.maxLogSize
+            maxLogSize: config.logInfo.maxLogSize,
+            backups: 10
         },
         error: {
             type: "dateFile",
             filename: "./logs/log4js_err-",
             pattern: "yyyy-MM-dd.log",
             alwaysIncludePattern: true,
-            maxLogSize: config.logInfo.maxLogSize
+            maxLogSize: config.logInfo.maxLogSize,
+            backups: 10
         },
         errorFilter: {
             type: "logLevelFilter",
@@ -105,523 +51,15 @@ log4js.configure({
         },
     },
     categories: {
-        default: { appenders: ['console', 'log', 'errorFilter'], level: 'info' }
+        default: { appenders: ['console', 'log', 'errorFilter'], level: 'debug' }
     },
     pm2: true,
     pm2InstanceVar: 'INSTANCE_ID'
 });
-const logger = log4js.getLogger('graphTree_search_app');
-
-//定时触发请求neo4j server, 保持session的活跃
-function callNeo4jServer() {
-    return new Promise(async (resolve, reject) => {
-        let resultPromise = session.run(`match (n) return n limit 1`);
-        resultPromise.then(result => {
-            session.close();
-            if (result.records.length > 0) {
-                let id = result.records[0]._fields[0].properties.ITCode2.low;
-                console.log(moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ' 成功请求neo4j server 一次');
-                return resolve(id);
-            }
-            else if (result.records.length == 0) {
-                console.logger(moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ' 请求neo4j server 后未获得结果 ');
-                return resolve(null);
-            }
-        }).catch(err => {
-            console.error(moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ' callNeo4jServerError: ' + err);
-            logger.error('callNeo4jServerError: ' + err);
-            return reject(err);
-        });
-    });
-}
-
-//路径数组元素去除出现两次以上的路径
-function uniquePath(pathes, codes) {
-    let uniqueFlag = true;
-    for (let subCode of codes) {
-        let codeIndex = 0;
-        for (let subPath of pathes) {
-            if (subPath.sourceCode == subCode || subPath.targetCode == subCode) codeIndex++;
-        }
-        if (codeIndex >= 3) {
-            uniqueFlag = false;
-            return uniqueFlag;
-        }
-    }
-    return uniqueFlag;
-}
-
-function findNodeId(code) {
-    return new Promise(async (resolve, reject) => {
-        // let session = driver.session();
-        let resultPromise = session.run(`match (compId:company {ITCode2: ${code}}) return compId`);
-        // let resultPromise = session.run(`match (compId:company {ITCode2: '${code}'}) return compId`);
-        resultPromise.then(result => {
-            session.close();
-            if (result.records.length == 0)
-                return resolve(null);
-            let id = result.records[0]._fields[0].identity.low;
-            if (id)
-                return resolve(id);
-            else
-                return resolve(0);
-        }).catch(err => {
-            console.error('findNodeIdError: ' + err);
-            logger.error('findNodeIdError: ' + err);
-            session.close();
-            driver.close();
-            return reject(err);
-        });
-    });
-}
-
-//处理ITCode2查询ITName为空的情况
-function handlerAllNames(names) {
-    // let newNames = new Set();
-    let newNames = [];
-    for (let subName of names) {
-        if (subName != '') {
-            // newNames.add(subName);
-            newNames.push(subName);
-        }
-        else if (subName == '') {
-            subName = 'ITName is null!';
-            // newNames.add(subName);
-            newNames.push(subName);
-        }
-    }
-    // return Array.from(newNames);
-    return newNames;
-}
-
-//将ITCode2->ITName对放入Map中
-function getCodeNameMapping(codes, names) {
-    let codeNameMap = new Map();
-    if (codes.length == names.length) {
-        for (let i = 0; i < codes.length; i++) {
-            codeNameMap.set(codes[i], names[i]);
-        }
-        return codeNameMap;
-    }
-}
-
-/* 质朴长存法, num：原数字, n：最终生成的数字位数*/
-function pad(num, n) {
-    var len = num.toString().length;
-    while (len < n) {
-        num = "0" + num;
-        len++;
-    }
-    return num;
-}
-
-//处理neo4j返回的JSON数据格式
-async function handlerPromise(result, index) {
-    let allNames = [];
-    // let allCodes = [];
-    let allCodes = new Set();                                    //使用set保证数据的唯一性
-    let uniqueCodes = [];                                            //存储唯一性的codes数据元素
-    let num = 0;
-    // let detail = {};
-    // let i = 0;   
-    let pathTypeName = "";
-    if (index == 0)
-        pathTypeName = "InvestPath";
-    else if (index == 1)
-        pathTypeName = "InvestedByPath";
-    else if (index == 2)
-        pathTypeName = "ShortestPath";
-    else if (index == 3)
-        pathTypeName = "FullPath";
-    //只有在单独调用接口时会使用到                                     //记录每种路径查询方式下的具体路径数
-    else if (index == 4)
-        pathTypeName = "CommonInvestPath";
-    else if (index == 5)
-        pathTypeName = "CommonInvestedByPath";
-    else if (index == 6)
-        pathTypeName = "DirectInvestPath";
-    else if (index == 7)
-        pathTypeName = "DirectInvestedByPath";
-    let promiseResult = { toPaNum: num, dataDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${index}`, typeName: pathTypeName, names: [] } };
-
-    promiseResult.dataDetail.data.pathNum = result.records.length;
-    // num += promiseResult.dataDetail.data.pathNum;
-    num += result.records.length;                                  //调用 neo4j 返回的所有路径，包括有重复点的路径
-
-    if (result.records.length == 0)
-        return promiseResult;
-    else {
-        for (let subRecord of result.records) {
-            let pathArray = {};
-            let uniquePathArray = {};
-            // let eachPathArray = [];
-            let tempPathArray = [];
-            for (let subField of subRecord._fields) {
-                // let subFieldCodes = [];
-                let subFieldCodes = new Set();
-                let uniqueFieldCodes = [];
-                for (let subSegment of subField.segments) {
-                    let startSegmentCode = 0;
-                    if (null != subSegment.start.properties.ITCode2.low) {
-                        startSegmentCode = subSegment.start.properties.ITCode2.low;
-                    } else if (null == subSegment.start.properties.ITCode2.low && null != subSegment.start.properties.ITCode2) {
-                        startSegmentCode = subSegment.start.properties.ITCode2;
-                    }
-                    let endSegmentCode = 0;
-                    if (null != subSegment.end.properties.ITCode2.low) {
-                        endSegmentCode = subSegment.end.properties.ITCode2.low;
-                    } else if (null == subSegment.end.properties.ITCode2.low && null != subSegment.end.properties.ITCode2) {
-                        endSegmentCode = subSegment.end.properties.ITCode2;
-                    }
-                    // subFieldCodes.push(startSegmentCode, endSegmentCode);
-                    subFieldCodes.add(startSegmentCode);
-                    subFieldCodes.add(endSegmentCode);
-                }
-                // uniqueFieldCodes = unique(subFieldCodes);
-                uniqueFieldCodes = Array.from(subFieldCodes);
-                for (let subSegment of subField.segments) {
-                    // allNames.push(subSegment.start.properties.ITName, subSegment.end.properties.ITName);
-                    // allCodes.push(subSegment.start.properties.ITCode2, subSegment.end.properties.ITCode2);
-                    let startSegmentLow = subSegment.start.identity.low;
-                    // let startSegmentName = subSegment.start.properties.ITName;
-
-                    //取start node的ITCode2
-                    // let startSegmentCode = 0;
-                    // if (subSegment.start.properties.ITCode2.low) {
-                    //     startSegmentCode = subSegment.start.properties.ITCode2.low;
-                    // } else if (!subSegment.start.properties.ITCode2.low && subSegment.start.properties.ITCode2) {
-                    //     startSegmentCode = subSegment.start.properties.ITCode2;
-                    // }
-
-                    //取到start nodes的isPerson属性
-                    let startIsPerson = null;
-                    if (null != subSegment.start.properties.isPerson) {
-                        startIsPerson = subSegment.start.properties.isPerson;
-                    } else if (null == subSegment.start.properties.isPerson && null != subSegment.start.properties.isPerson.low) {
-                        startIsPerson = subSegment.start.properties.isPerson.low;
-                    }
-
-                    //取到end nodes的isPerson属性
-                    let endIsPerson = null;
-                    if (null != subSegment.end.properties.isPerson) {
-                        endIsPerson = subSegment.end.properties.isPerson;
-                    } else if (null == subSegment.end.properties.isPerson && null != subSegment.end.properties.isPerson.low) {
-                        endIsPerson = subSegment.end.properties.isPerson.low;
-                    }
-
-                    //通过isPerson为ITCode2取值
-                    let startSegmentCode = null;
-                    let endSegmentCode = null;
-                    // if (startIsPerson == '1' || startIsPerson == 1) {
-                    //     let id = subSegment.start.properties.ITCode2.low;
-                    //     startSegmentCode = 'P' + pad(id, 9);
-                    // } else {
-                    //     startSegmentCode = subSegment.start.properties.ITCode2.low;
-                    // }
-                    // if (endIsPerson == '1' || endIsPerson == 1) {
-                    //     let id = subSegment.end.properties.ITCode2.low;
-                    //     endSegmentCode = 'P' + pad(id, 9);
-                    // } else {
-                    //     endSegmentCode = subSegment.end.properties.ITCode2.low;
-                    // }
-                    if (null != subSegment.start.properties.ITCode2) {
-                        startSegmentCode = subSegment.start.properties.ITCode2;
-                    }
-                    else if (null == subSegment.start.properties.ITCode2 && null != subSegment.start.properties.ITCode2.low) {
-                        startSegmentCode = subSegment.start.properties.ITCode2.low;
-                    }
-                    if (null != subSegment.end.properties.ITCode2) {
-                        endSegmentCode = subSegment.end.properties.ITCode2;
-                    }
-                    else if (null == subSegment.end.properties.ITCode2 && null != subSegment.end.properties.ITCode2.low) {
-                        endSegmentCode = subSegment.end.properties.ITCode2.low;
-                    }
-
-                    //处理无机构代码的start nodes的name问题
-                    let startSegmentName = null;
-                    //取到start nodes的isExtra属性
-                    let startIsExtra = null;
-                    if (null != subSegment.start.properties.isExtra) {
-                        startIsExtra = subSegment.start.properties.isExtra;
-                    } 
-                    else if (null == subSegment.start.properties.isExtra && null != subSegment.start.properties.isExtra.low) {
-                        startIsExtra = subSegment.start.properties.isExtra.low;
-                    }
-                    if (startIsExtra == 1 || startIsExtra == '1' || startIsExtra == 'null') {
-                        startSegmentName = subSegment.start.properties.name;
-                    } 
-                    else if (startIsExtra == 0 || startIsExtra == '0') {
-                        startSegmentName = null;
-                        // allCodes.push(`${startSegmentCode}`);      
-                        allCodes.add(`${startSegmentCode}`);                                                                     //将有机构代码的ITCode存入数组
-                    }
-
-                    //取到start nodes的isExtra属性
-                    // let startIsExtra = null;
-                    // if (null != subSegment.start.properties.isExtra) {
-                    //     startIsExtra = subSegment.start.properties.isExtra;
-                    // } else if (null == subSegment.start.properties.isExtra && null != subSegment.start.properties.isExtra.low) {
-                    //     startIsExtra = subSegment.start.properties.isExtra.low;
-                    // }
-
-                    let relSegmentStartLow = subSegment.relationship.start.low;
-                    //startRegCapitalRMB取值
-                    let startRegCapitalRMB = 0; 
-                    //startRegCapitalUnit取值
-                    let startRegCapitalUnit = '万人民币元';                                                        //注册资金单位
-                    //startRegCapital取值
-                    let startRegCapital = 0;                                                                      //注册资金(原单位)
-                    if (startIsPerson == 0 || startIsPerson == '0') {
-                        if (null != subSegment.start.properties.RMBFund) {
-                            startRegCapitalRMB = subSegment.start.properties.RMBFund;
-                        }
-                        else if (null == subSegment.start.properties.RMBFund && null != subSegment.start.properties.RMBFund.low) {
-                            startRegCapitalRMB = subSegment.start.properties.RMBFund.low;
-                        }
-                        startRegCapitalRMB = parseFloat(startRegCapitalRMB.toFixed(2));                            //将RMBFund值转换2位小数              
-                        if (null != subSegment.start.properties.regFundUnit) {
-                            startRegCapitalUnit = subSegment.start.properties.regFundUnit;
-                        }
-                        else if (null == subSegment.start.properties.regFundUnit && null != subSegment.start.properties.regFundUnit.low) {
-                            startRegCapitalUnit = subSegment.start.properties.regFundUnit.low;
-                        }
-                        if (null != subSegment.start.properties.regFund) {
-                            startRegCapital = subSegment.start.properties.regFund;
-                        }
-                        else if (null == subSegment.start.properties.regFund && null != subSegment.start.properties.regFund.low) {
-                            startRegCapital = subSegment.start.properties.regFund.low;
-                        }    
-                        startRegCapital = parseFloat(startRegCapital.toFixed(2));                                  //将RegFund值转换2位小数              
-                    }                                                      
-
-                    //处理持股比例shareholdRatio, 认缴金额(RMB)shareholdQuantityRMB, 认缴金额shareholdQuantity, 认缴金额单位shareholdQuantityUnit
-                    let relSegmentEndLow = subSegment.relationship.end.low;
-                    //持股比例shareholdRatio取值, 如果weight是全量导入的，直接取weight的值；如果weight是增量导入的，需要取到weight节点下的low值
-                    let shareholdRatio = 0; 
-                    //认缴金额(RMB)shareholdQuantityRMB取值
-                    let shareholdQuantityRMB = 0;                                                                                         //认缴金额(RMB)
-                    //认缴金额shareholdQuantity取值
-                    let shareholdQuantity = 0;                                                                                            //持股比例
-                    //认缴金额单位shareholdQuantityUnit取值
-                    let shareholdQuantityUnit = '万人民币元';                                                                              //认缴金额单位
-                    if (Object.keys(subSegment.relationship.properties).length > 0) {
-                        if (null != subSegment.relationship.properties.weight.low) {
-                            shareholdRatio = subSegment.relationship.properties.weight.low;
-                        }
-                        else if (null == subSegment.relationship.properties.weight.low && null != subSegment.relationship.properties.weight) {
-                            shareholdRatio = subSegment.relationship.properties.weight;
-                        }
-                        shareholdRatio = parseFloat(shareholdRatio.toFixed(2));                                                            //将weight值转换2位小数
-                        if (null != subSegment.relationship.properties.subAmountRMB.low) {
-                            shareholdQuantityRMB = subSegment.relationship.properties.subAmountRMB.low;
-                        }
-                        else if (null == subSegment.relationship.properties.subAmountRMB.low && null != subSegment.relationship.properties.subAmountRMB) {
-                            shareholdQuantityRMB = subSegment.relationship.properties.subAmountRMB;
-                        }
-                        shareholdQuantityRMB = parseFloat(shareholdQuantityRMB.toFixed(2));                                                //将subAmountRMB值转换2位小数
-                        if (null != subSegment.relationship.properties.subAmount.low) {
-                            shareholdQuantity = subSegment.relationship.properties.subAmount.low;
-                        }
-                        else if (null == subSegment.relationship.properties.subAmount.low && null != subSegment.relationship.properties.subAmount) {
-                            shareholdQuantity = subSegment.relationship.properties.subAmount;
-                        }
-                        shareholdQuantity = parseFloat(shareholdQuantity.toFixed(2));                                                     //将subAmount值转换2位小数
-                        if (null != subSegment.relationship.properties.subAmountUnit.low) {
-                            shareholdQuantityUnit = subSegment.relationship.properties.subAmountUnit.low;
-                        }
-                        else if (null == subSegment.relationship.properties.subAmountUnit.low && null != subSegment.relationship.properties.subAmountUnit) {
-                            shareholdQuantityUnit = subSegment.relationship.properties.subAmountUnit;
-                        }
-                    }
-
-                    let endSegmentLow = subSegment.end.identity.low;
-                    // let endSegmentName = subSegment.end.properties.ITName;
-                    //取到end nodes的ITCode2
-                    // let endSegmentCode = 0;
-                    // if (subSegment.end.properties.ITCode2.low) {
-                    //     endSegmentCode = subSegment.end.properties.ITCode2.low;
-                    // } else if (!subSegment.end.properties.ITCode2.low && subSegment.end.properties.ITCode2) {
-                    //     endSegmentCode = subSegment.end.properties.ITCode2;
-                    // }
-
-                    //处理无机构代码的end nodes的name问题
-                    let endSegmentName = null;
-                    //取到end nodes的isExtra属性
-                    let endIsExtra = null;
-                    if (null != subSegment.end.properties.isExtra) {
-                        endIsExtra = subSegment.end.properties.isExtra;
-                    } 
-                    else if (null == subSegment.end.properties.isExtra && null != subSegment.end.properties.isExtra.low) {
-                        endIsExtra = subSegment.end.properties.isExtra.low;
-                    }
-                    if (endIsExtra == 1 || endIsExtra == '1' || endIsExtra == 'null') {
-                        endSegmentName = subSegment.end.properties.name;
-                    } 
-                    else if (endIsExtra == 0 || endIsExtra == '0') {
-                        endSegmentName = null;
-                        // allCodes.push(`${endSegmentCode}`); 
-                        allCodes.add(`${endSegmentCode}`);                                                                        //将有机构代码的ITCode存入数组
-                    }
-
-                    //取到end nodes的isExtra属性
-                    // let endIsExtra = null;
-                    // if (null != subSegment.end.properties.isExtra) {
-                    //     endIsExtra = subSegment.end.properties.isExtra;
-                    // } else if (null == subSegment.end.properties.isExtra && null != subSegment.end.properties.isExtra.low) {
-                    //     endIsExtra = subSegment.end.properties.isExtra.low;
-                    // }
-
-                    //endRegCapitalRMB取值
-                    let endRegCapitalRMB = 0;                                                                    //注册资金(RMB)
-                    //endRegCapital取值
-                    let endRegCapital = 0;                                                                       //注册资金(原单位)
-                    //endRegCapitalUnit取值
-                    let endRegCapitalUnit = '万人民币元';                                                         //注册资金单位
-                    if (endIsPerson == 0 || endIsPerson == '0') {
-                        if (null != subSegment.end.properties.RMBFund) {
-                            endRegCapitalRMB = subSegment.end.properties.RMBFund;
-                        }
-                        else if (null == subSegment.end.properties.RMBFund && null != subSegment.end.properties.RMBFund.low) {
-                            endRegCapitalRMB = subSegment.end.properties.RMBFund.low;
-                        }
-                        endRegCapitalRMB = parseFloat(endRegCapitalRMB.toFixed(2));                              //将RMBFund值转换2位小数     
-                        if (null != subSegment.end.properties.regFund) {
-                            endRegCapital = subSegment.end.properties.regFund;
-                        }
-                        else if (null == subSegment.end.properties.regFund && null != subSegment.end.properties.regFund.low) {
-                            endRegCapital = subSegment.end.properties.regFund.low;
-                        }
-                        endRegCapital = parseFloat(endRegCapital.toFixed(2));                                    //将RegFund值转换2位小数   
-                        if (null != subSegment.end.properties.regFundUnit) {
-                            endRegCapitalUnit = subSegment.end.properties.regFundUnit;
-                        }
-                        else if (null == subSegment.end.properties.regFundUnit && null != subSegment.end.properties.regFundUnit.low) {
-                            endRegCapitalUnit = subSegment.end.properties.regFundUnit.low;
-                        }
-                    }
-         
-                    // let startSegmentName = await queryCodeToName(startSegmentCode);                          //不直接获取eno4j中的ITName，而是通过外部接口由ITCode2获取ITName
-                    // let endSegmentName = await queryCodeToName(endSegmentCode);
-                    // allNames.push(startSegmentName, endSegmentName);
-
-                    //过滤ITCode2为UUID的codes, 即无机构代码的nodes 不参加code->name的字典查找
-                    // allCodes.push(`${startSegmentCode}`, `${endSegmentCode}`);
-                    // allCodes.add(startSegmentCode);
-                    // allCodes.add(endSegmentCode);
-                    let path = {};
-                    if (relSegmentStartLow == startSegmentLow && relSegmentEndLow == endSegmentLow) {
-                        // path.source = startSegmentName;
-                        path.sourceCode = startSegmentCode;
-                        path.sourceRegCapitalRMB = startRegCapitalRMB;
-                        path.sourceRegCapital = startRegCapital;
-                        path.sourceRegCapitalUnit = startRegCapitalUnit;
-                        path.source = startSegmentName;
-                        path.sourceIsExtra = startIsExtra;
-                        path.sourceIsPerson = startIsPerson;
-                        // path.target = endSegmentName;
-                        path.shareholdRatio = shareholdRatio;
-                        path.shareholdQuantityRMB = shareholdQuantityRMB;
-                        path.shareholdQuantity = shareholdQuantity;
-                        path.shareholdQuantityUnit = shareholdQuantityUnit;
-
-                        path.targetCode = endSegmentCode;
-                        path.targetRegCapitalRMB = endRegCapitalRMB;
-                        path.targetRegCapital = endRegCapital;
-                        path.targetRegCapitalUnit = endRegCapitalUnit;
-                        path.target = endSegmentName;
-                        path.targetIsExtra = endIsExtra;
-                        path.targetIsPerson = endIsPerson;
-                    } else if (relSegmentStartLow == endSegmentLow && relSegmentEndLow == startSegmentLow) {
-                        // path.source = endSegmentName;
-                        path.sourceCode = endSegmentCode;
-                        path.sourceRegCapitalRMB = endRegCapitalRMB;
-                        path.sourceRegCapital = endRegCapital;
-                        path.sourceRegCapitalUnit = endRegCapitalUnit;
-                        path.source = endSegmentName;
-                        path.sourceIsExtra = endIsExtra;
-                        path.sourceIsPerson = endIsPerson;
-                        // path.target = startSegmentName;
-                        path.shareholdRatio = shareholdRatio;
-                        path.shareholdQuantityRMB = shareholdQuantityRMB;
-                        path.shareholdQuantity = shareholdQuantity;
-                        path.shareholdQuantityUnit = shareholdQuantityUnit;
-
-                        path.targetCode = startSegmentCode;
-                        path.targetRegCapitalRMB = startRegCapitalRMB;
-                        path.targetRegCapital = startRegCapital;
-                        path.targetRegCapitalUnit = startRegCapitalUnit;
-                        path.target = startSegmentName;
-                        path.targetIsExtra = startIsExtra;
-                        path.targetIsPerson = startIsPerson;
-                    }
-                    //去除包含"流通股"的path, 除包含"流通股份有限公司"的path
-                    if (path.source != null) {
-                        if (path.source.indexOf('流通股') >= 0 && path.source.indexOf('股份有限公司') == -1) {
-                            console.log('过滤包含"流通股"的path, source: ' + path.source);
-                            logger.info('过滤包含"流通股"的path, source: ' + path.source);
-                        }
-                        else {
-                            tempPathArray.push(path);
-                            pathArray.path = tempPathArray;
-                        }
-                    }
-                    else {
-                        tempPathArray.push(path);
-                        pathArray.path = tempPathArray;
-                    }
-                    // tempPathArray.push(path);
-                    // pathArray.path = tempPathArray;
-                }
-
-                let isUniquePath = false;
-                if (pathArray.hasOwnProperty('path')) {
-                    isUniquePath = uniquePath(pathArray.path, uniqueFieldCodes);
-                }
-                if (isUniquePath == true) {
-                    uniquePathArray = pathArray;
-                }
-                else if (isUniquePath == false) {
-                    // pathNum--;
-                    num--;
-                }
-            }
-
-            if (Object.keys(uniquePathArray).length != 0)
-                promiseResult.dataDetail.data.pathDetail.push(uniquePathArray);
-            promiseResult.dataDetail.data.pathNum = num;
-            // dataResult.data.pathDetail.name = " ";
-        }
-        // uniqueCodes = unique(allCodes);
-        uniqueCodes = Array.from(allCodes);
-        // allNames = await cacheHandlers.getAllNames(uniqueCodes);             //ITCode2->ITName
-        let retryCount = 0;
-        do {
-            try {
-                allNames = await cacheHandlers.getAllNames(uniqueCodes);             //ITCode2->ITName
-                break;
-            } catch (err) {
-                retryCount++;
-            }
-        } while (retryCount < 3)
-        if (retryCount == 3) {
-            console.error('retryCount: 3, 批量查询机构名称失败');
-            logger.error('retryCount: 3, 批量查询机构名称失败');
-        }
-        let newAllNames = handlerAllNames(allNames);                         // 处理ITName为空的情况
-
-        let codeNameMapRes = getCodeNameMapping(uniqueCodes, newAllNames);   //获取ITCode2->ITName的Map
-        promiseResult.mapRes = codeNameMapRes;
-        promiseResult.uniqueCodes = uniqueCodes;
-
-        promiseResult.dataDetail.names = newAllNames;
-        promiseResult.toPaNum = num;
-        return promiseResult;
-    }
-}
+const logger = log4js.getLogger('arangodb_search');
 
 //为每个path追加source/target节点，即增加ITName属性
 function setSourceTarget(map, pathDetail) {
-    // let newPathDetail = [];
     try {
         for (let subPathDetail of pathDetail) {
             for (let subPath of subPathDetail.path) {
@@ -634,7 +72,6 @@ function setSourceTarget(map, pathDetail) {
                 }
                 let targetName = null;
                 if (subPath.targetIsExtra == '1' || subPath.targetIsExtra == 1 || subPath.targetIsExtra == 'null') {
-                    // targetName = subPath.targetIsExtra;
                     targetName = subPath.target;
                 }
                 else if (subPath.targetIsExtra == '0' || subPath.targetIsExtra == 0) {
@@ -650,211 +87,18 @@ function setSourceTarget(map, pathDetail) {
         logger.error(err);
         return (err);
     }
-
 }
 
-//通过注册资本区间值筛选路径， 对外投资、担保
-function filterPathAccRegFund1(paths, lowFund, highFund) {
-    let newPaths = [];
-    try {
-        if (lowFund && highFund) {                                                     //lowFund和highFund存在
-            for (let subPathDetail of paths) {
-                let regFundSet = new Set();                                           //将每个subPathDetail下的regFund存储
-                let flag = true;
-                for (let i = 0; i < subPathDetail.path.length; i++) {
-                    let sourceRegFund = subPathDetail.path[i].sourceRegCapitalRMB;
-                    let targetRegFund = subPathDetail.path[i].targetRegCapitalRMB;
-                    regFundSet.add(sourceRegFund);
-                    regFundSet.add(targetRegFund);
-                    if (i == 0) {
-                        regFundSet.delete(sourceRegFund);                               //去除第一个元素
-                    }
-                }
-                if (subPathDetail.path.length != 0) {
-                    for (let subRegFund of regFundSet) {
-                        if (subRegFund < lowFund || subRegFund > highFund) {            //如果subRegFund不在low和hign范围内，则将flag置成false,并停止数组的遍历
-                            flag = false;
-                            break;
-                        } else if (subRegFund >= lowFund && subRegFund <= highFund) {    //如果subRegFund在low和hign范围内，则将flag置成true,并继续数组的遍历
-                            continue;
-                        }
-                    }
-                    if (flag == true) newPaths.push(subPathDetail);
-                }
-            }
-        }
-        else if (lowFund && !highFund) {                                               //lowFund存在highFund不存在
-            for (let subPathDetail of paths) {
-                let regFundSet = new Set();                                            //将每个subPathDetail下的regFund存储
-                let flag = true;
-                for (let i = 0; i < subPathDetail.path.length; i++) {
-                    let sourceRegFund = subPathDetail.path[i].sourceRegCapitalRMB;
-                    let targetRegFund = subPathDetail.path[i].targetRegCapitalRMB;
-                    regFundSet.add(sourceRegFund);
-                    regFundSet.add(targetRegFund);
-                    if (i == 0) {
-                        regFundSet.delete(sourceRegFund);                               //去除第一个元素
-                    }
-                }
-                if (subPathDetail.path.length != 0) {
-                    for (let subRegFund of regFundSet) {
-                        if (subRegFund < lowFund) {                                    //如果subRegFund>low，则将flag置成false,并停止数组的遍历
-                            flag = false;
-                            break;
-                        } else if (subRegFund >= lowFund) {                            //如果subRegFund<=low，则将flag置成true,并继续数组的遍历
-                            continue;
-                        }
-                    }
-                    if (flag == true) newPaths.push(subPathDetail);
-                }
-            }
-        }
-        else if (!lowFund && highFund) {                                               //lowFund不存在highFund存在
-            for (let subPathDetail of paths) {
-                let regFundSet = new Set();                                            //将每个subPathDetail下的regFund存储
-                let flag = true;
-                for (let i = 0; i < subPathDetail.path.length; i++) {
-                    let sourceRegFund = subPathDetail.path[i].sourceRegCapitalRMB;
-                    let targetRegFund = subPathDetail.path[i].targetRegCapitalRMB;
-                    regFundSet.add(sourceRegFund);
-                    regFundSet.add(targetRegFund);
-                    if (i == 0) {
-                        regFundSet.delete(sourceRegFund);                               //去除第一个元素
-                    }
-                }
-                if (subPathDetail.path.length != 0) {
-                    for (let subRegFund of regFundSet) {
-                        if (subRegFund > highFund) {                                   //如果subRegFund>hign，则将flag置成false,并停止数组的遍历
-                            flag = false;
-                            break;
-                        } else if (subRegFund <= highFund) {                          //如果subRegFund<=hign，则将flag置成true,并继续数组的遍历
-                            continue;
-                        }
-                    }
-                    if (flag == true) newPaths.push(subPathDetail);
-                }
-            }
-        }
-    } catch (err) {
-        console.error(err);
-        logger.error(err);
-        return (err);
-    }
-    return newPaths;
-}
-
-//通过注册资本区间值筛选路径， 股东、被担保
-function filterPathAccRegFund2(paths, lowFund, highFund) {
-    let newPaths = [];
-    try {
-        if (lowFund && highFund) {                                                     //lowFund和highFund存在
-            for (let subPathDetail of paths) {
-                let regFundSet = new Set();                                           //将每个subPathDetail下的regFund存储
-                let flag = true;
-                for (let i = 0; i < subPathDetail.path.length; i++) {
-                    let sourceRegFund = subPathDetail.path[i].sourceRegCapitalRMB;
-                    let targetRegFund = subPathDetail.path[i].targetRegCapitalRMB;
-                    regFundSet.add(sourceRegFund);
-                    regFundSet.add(targetRegFund);
-                    if (i == 0) {
-                        regFundSet.delete(targetRegFund);                               //去除第一个元素
-                    }
-                }
-                if (subPathDetail.path.length != 0) {
-                    for (let subRegFund of regFundSet) {
-                        if (subRegFund < lowFund || subRegFund > highFund) {            //如果subRegFund不在low和hign范围内，则将flag置成false,并停止数组的遍历
-                            flag = false;
-                            break;
-                        } else if (subRegFund >= lowFund && subRegFund <= highFund) {    //如果subRegFund在low和hign范围内，则将flag置成true,并继续数组的遍历
-                            continue;
-                        }
-                    }
-                    if (flag == true) newPaths.push(subPathDetail);
-                }
-            }
-        }
-        else if (lowFund && !highFund) {                                               //lowFund存在highFund不存在
-            for (let subPathDetail of paths) {
-                let regFundSet = new Set();                                            //将每个subPathDetail下的regFund存储
-                let flag = true;
-                for (let i = 0; i < subPathDetail.path.length; i++) {
-                    let sourceRegFund = subPathDetail.path[i].sourceRegCapitalRMB;
-                    let targetRegFund = subPathDetail.path[i].targetRegCapitalRMB;
-                    regFundSet.add(sourceRegFund);
-                    regFundSet.add(targetRegFund);
-                    if (i == 0) {
-                        regFundSet.delete(targetRegFund);                               //去除第一个元素
-                    }
-                }
-                if (subPathDetail.path.length != 0) {
-                    for (let subRegFund of regFundSet) {
-                        if (subRegFund < lowFund) {                                    //如果subRegFund>low，则将flag置成false,并停止数组的遍历
-                            flag = false;
-                            break;
-                        } else if (subRegFund >= lowFund) {                            //如果subRegFund<=low，则将flag置成true,并继续数组的遍历
-                            continue;
-                        }
-                    }
-                    if (flag == true) newPaths.push(subPathDetail);
-                }
-            }
-        }
-        else if (!lowFund && highFund) {                                               //lowFund不存在highFund存在
-            for (let subPathDetail of paths) {
-                let regFundSet = new Set();                                            //将每个subPathDetail下的regFund存储
-                let flag = true;
-                for (let i = 0; i < subPathDetail.path.length; i++) {
-                    let sourceRegFund = subPathDetail.path[i].sourceRegCapitalRMB;
-                    let targetRegFund = subPathDetail.path[i].targetRegCapitalRMB;
-                    regFundSet.add(sourceRegFund);
-                    regFundSet.add(targetRegFund);
-                    if (i == 0) {
-                        regFundSet.delete(targetRegFund);                               //去除第一个元素
-                    }
-                }
-                if (subPathDetail.path.length != 0) {
-                    for (let subRegFund of regFundSet) {
-                        if (subRegFund > highFund) {                                   //如果subRegFund>hign，则将flag置成false,并停止数组的遍历
-                            flag = false;
-                            break;
-                        } else if (subRegFund <= highFund) {                          //如果subRegFund<=hign，则将flag置成true,并继续数组的遍历
-                            continue;
-                        }
-                    }
-                    if (flag == true) newPaths.push(subPathDetail);
-                }
-            }
-        }
-    } catch (err) {
-        console.error(err);
-        logger.error(err);
-        return (err);
-    }
-    return newPaths;
-}
-
-//处理neo4j server 返回的结果
-async function handlerNeo4jResult(resultPromise, lowFund, highFund) {
+//处理arangodb server 返回的结果
+async function handlerQueryResult1(resultPromise, index) {
     let queryNodeResult = {};
-    let j = 6;                                                              //记录每种路径查询方式索引号,directInvestPathQuery索引为6
     let handlerPromiseStart = Date.now();
-    let res = await handlerPromise(resultPromise, j);
+    let res = await resultHandlers.handlerPromise1(resultPromise, index);
     let handlerPromiseCost = Date.now() - handlerPromiseStart;
     console.log('handlerPromiseCost: ' + handlerPromiseCost + 'ms');
     logger.info('handlerPromiseCost: ' + handlerPromiseCost + 'ms');
     let beforePathDetail = res.dataDetail.data.pathDetail;                  //没有ITName的pathDetail
-    let newBeforePathDetail = [];
-    if (lowFund || highFund) {
-        let now = Date.now();
-        newBeforePathDetail = filterPathAccRegFund1(beforePathDetail, lowFund, highFund);
-
-        let filterPathAccRegFundCost = Date.now() - now;
-        console.log('filterPathAccRegFundCost: ' + filterPathAccRegFundCost + 'ms');
-    }
-    else if (!lowFund && !highFund) {
-        newBeforePathDetail = beforePathDetail;
-    }
-    let afterPathDetail = setSourceTarget(res.mapRes, newBeforePathDetail);
+    let afterPathDetail = setSourceTarget(res.mapRes, beforePathDetail);
     res.dataDetail.data.pathDetail = afterPathDetail;                       //用带ITName的pathDetail替换原来的
     let newNames = [];
     let nameSet = new Set();
@@ -870,29 +114,102 @@ async function handlerNeo4jResult(resultPromise, lowFund, highFund) {
         }
     }
     res.dataDetail.names = newNames;
-    res.dataDetail.data.pathNum = newBeforePathDetail.length;
+    res.dataDetail.data.pathNum = afterPathDetail.length;
     queryNodeResult.pathDetail = res.dataDetail;
     return queryNodeResult;
 }
 
-//处理neo4j session1
-function sessionRun1(queryBody) {
-    let session = driver.session();
-    return session.run(queryBody).then(result => {
-        session.close();
-        console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ' sessionRun1 session close!');
-        return result;
-    });
+//处理 server 返回的结果
+async function handlerQueryResult2(from, to, resultPromise, j) {
+    let queryNodeResult = { nodeResultOne: { pathDetail: {} }, nodeResultTwo: { pathDetail: {} }, nodeResultThree: { pathDetail: {} } };
+    let handlerPromiseStart = Date.now();
+    let promiseResult = await resultHandlers.handlerPromise2(from, to, resultPromise, j);
+    let handlerPromiseCost = Date.now() - handlerPromiseStart;
+    console.log('handlerPromiseCost: ' + handlerPromiseCost + 'ms');
+    logger.info('handlerPromiseCost: ' + handlerPromiseCost + 'ms');
+    let beforePathDetailOne = promiseResult.pathTypeOne.dataDetail.data.pathDetail;                  //没有ITName的pathDetail
+    let beforePathDetailTwo = promiseResult.pathTypeTwo.dataDetail.data.pathDetail;
+    let beforePathDetailThree = promiseResult.pathTypeThree.dataDetail.data.pathDetail;
+    let setSourceTargetStart = Date.now();
+    let afterPathDetailOne = setSourceTarget(promiseResult.pathTypeOne.mapRes, beforePathDetailOne);
+    let afterPathDetailTwo = setSourceTarget(promiseResult.pathTypeTwo.mapRes, beforePathDetailTwo);
+    // let afterPathDetailThree = setSourceTarget(promiseResult.pathTypeThree.mapRes, beforePathDetailThree);
+    let setSourceTargetCost = Date.now() - setSourceTargetStart;
+    console.log('setSourceTargetCost: ' + setSourceTargetCost + 'ms');
+    logger.info('setSourceTargetCost: ' + setSourceTargetCost + 'ms');
+
+    promiseResult.pathTypeOne.dataDetail.data.pathDetail = afterPathDetailOne;                       //用带ITName的pathDetail替换原来的    
+    queryNodeResult.nodeResultOne.pathDetail = promiseResult.pathTypeOne.dataDetail;
+
+    promiseResult.pathTypeTwo.dataDetail.data.pathDetail = afterPathDetailTwo;                       //用带ITName的pathDetail替换原来的    
+    queryNodeResult.nodeResultTwo.pathDetail = promiseResult.pathTypeTwo.dataDetail;
+
+    promiseResult.pathTypeThree.dataDetail.data.pathDetail = beforePathDetailThree;
+    queryNodeResult.nodeResultThree.pathDetail = promiseResult.pathTypeThree.dataDetail;
+
+    return queryNodeResult;
 }
 
-//处理neo4j session2
-function sessionRun2(queryBody) {
-    let session = driver.session();
-    return session.run(queryBody).then(result => {
-        session.close();
-        console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ' sessionRun2 session close!');
-        return result;
-    });
+//查询arangodb
+async function executeQuery(queryBody) {
+    if (queryBody) {
+        try {
+            let cursor = await db.query(queryBody);
+            // let result = await cursor.next();
+            let result = cursor._result;
+            return result;
+        } catch (err) {
+            console.error(err);
+            logger.error(err);
+            return err;
+        }
+    }
+    else {
+        return [];
+    }
+
+}
+
+//为每个path追加增加ITName属性
+function setSourceTarget2(map, pathDetail) {
+    try {
+        for (let subPathDetail of pathDetail) {
+            for (let subPath of subPathDetail.path) {
+                let compName = null;
+                if (subPath.isExtra == '1' || subPath.isExtra == 1 || subPath.isExtra == 'null') {
+                    compName = subPath.compName;
+                }
+                else if (subPath.isExtra == '0' || subPath.isExtra == 0) {
+                    compName = map.get(`${subPath.compCode}`);
+                }
+                subPath.compName = compName;
+            }
+        }
+        return pathDetail;
+    } catch (err) {
+        console.error(err);
+        logger.error(err);
+        return (err);
+    }
+}
+
+//按 注册资本, 名称因子排序
+function sortRegName(a, b) {
+    let compName_a = a.path[0].compName;
+    let RMBRegFund_a = a.path[0].RMBRegFund;
+    let compName_b = b.path[0].compName;
+    let RMBRegFund_b = b.path[0].RMBRegFund;
+    let flag = 0;
+    let flagOne = RMBRegFund_b - RMBRegFund_a;                                                                  //注册资本 降序
+    let flagTwo = compName_b - compName_a;
+    //1. 注册资本 = 0
+    if (flagOne == 0) {
+        flag = flagTwo;                                                                                          //名称 降序
+    }
+    else if (flagOne != 0) {
+        flag = flagOne;
+    }
+    return flag;
 }
 
 let searchGraph = {
@@ -902,146 +219,163 @@ let searchGraph = {
         return new Promise(async function (resolve, reject) {
 
             try {
-                // let session = driver.session();
-                let j = 0;                                                                                //0代表DirectInvest
+                let j = 6;                                                                                //0代表DirectInvest
                 //先从redis中预热的数据中查询是否存在预热值
                 let warmUpKey = [code, DIDepth, lowWeight, highWeight, lowFund, highFund, j, relation].join('-');
-                let warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
                 let cacheKey = [j, code, relation, DIDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches, surStatus].join('-');
+                let warmUpValue = null;
+                if (warmUpSwitch == 'on') {
+                    warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
+                }
                 if (!warmUpValue) {
-                    // let nodeId = await findNodeId(code);
                     let queryBody = null;
-                    // let result = {};                                                                      //最终返回的结果
-                    let directGuaranteePathQuery = null;
-                    let directInvestPathQuery = null;
-
-                    //for test
-                    // surStatus = 0;
-
-                    if (isPerson == 0) {
-                        if (surStatus == 1 || surStatus == '1') {
-                            if (isExtra == 0 || isExtra == '0') {
-                                directGuaranteePathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:guarantees]->(to) where from.isExtra = '0' and to.isExtra = '0' return p`;
-                                if (isBranches == 0 || isBranches == '0') {
-                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0' and from.isBranches = '0' and to.isBranches = '0' and from.surStatus = '1' and to.surStatus = '1') return p`;
-                                } else {
-                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0' and from.surStatus = '1' and to.surStatus = '1') return p`;
-                                }
-                            } else {
-                                directGuaranteePathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:guarantees]->(to) return p`;
-                                if (isBranches == 0 || isBranches == '0') {
-                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isBranches = '0' and to.isBranches = '0' and from.surStatus = '1' and to.surStatus = '1') return p`;
-                                } else {
-                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.surStatus = '1' and to.surStatus = '1') return p`;
-                                }
-                            }
-                        } else {
-                            if (isExtra == 0 || isExtra == '0') {
-                                directGuaranteePathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:guarantees]->(to) where from.isExtra = '0' and to.isExtra = '0' return p`;
-                                if (isBranches == 0 || isBranches == '0') {
-                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0' and from.isBranches = '0' and to.isBranches = '0') return p`;
-                                } else {
-                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0') return p`;
-                                }
-                            } else {
-                                directGuaranteePathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:guarantees]->(to) return p`;
-                                if (isBranches == 0 || isBranches == '0') {
-                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isBranches = '0' and to.isBranches = '0') return p`;
-                                } else {
-                                    directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB}) return p`;
-                                }
-                            }
-                        }    
-                    }
-                    else if (isPerson == 1) {
-                        directGuaranteePathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:guarantees]->(to) return p`;
-                        directInvestPathQuery = `match p= (from:company{ITCode2: '${code}'})-[r:invests*..${DIDepth}]->(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB}) return p`;
-                    }
+                    let surStatusFilter = null;
+                    let isExtraFilter = null;
+                    let isBranchesFilter = null;
+                    let lowFundFilter = null;
+                    let highFundFilter = null;
+                    let lowWeightFilter = null;
+                    let highWeightFilter = null;
+                    let lowSubAmountFilter = null;
+                    let highSubAmountFilter = null;
+                    let nodeCollectionName = config.arangodbInfo.nodeCollectionName;
+                    let edgeCollectionName = config.arangodbInfo.edgeCollectionName[`${relation}`];
 
                     if (relation == 'invests') {
-                        queryBody = directInvestPathQuery;
+                        if (surStatus == 1 || surStatus == '1') {
+                            surStatusFilter = 'filter v.surStatus == 1';
+                        }
+                        if (isExtra == 0 || isExtra == '0') {
+                            isExtraFilter = 'filter v.isExtra == 0';
+                        }
+                        if (isBranches == 0 || isBranches == '0') {
+                            isBranchesFilter = 'filter v.isBranches == 0';
+                        }
+                        if (lowFund) {
+                            lowFundFilter = `filter v.RMBFund >= ${lowFund}`;
+                        }
+                        if (highFund) {
+                            highFundFilter = `filter v.RMBFund <= ${highFund}`;
+                        }
+                        if (lowWeight) {
+                            lowWeightFilter = `filter e.weight >= ${lowWeight}`;
+                        }
+                        if (highWeight) {
+                            highWeightFilter = `filter e.weight <= ${highWeight}`;
+                        }
+                        if (lowSubAmountRMB) {
+                            lowSubAmountFilter = `filter e.subAmountRMB >= ${lowSubAmountRMB}`;
+                        }
+                        if (highSubAmountRMB) {
+                            highSubAmountFilter = `filter e.subAmountRMB <= ${highSubAmountRMB}`;
+                        }
+                        if (isPerson == 0) {
+                            queryBody =
+                                `for v, e, p in 1..${DIDepth} outbound '${nodeCollectionName}/${code}' ${edgeCollectionName}
+                                    filter v.flag != 1 && e.flag != 1
+                                    ${surStatusFilter}
+                                    ${isExtraFilter}
+                                    ${isBranchesFilter}
+                                    ${lowFundFilter}
+                                    ${highFundFilter}
+                                    ${lowWeightFilter}
+                                    ${highWeightFilter}
+                                    ${lowSubAmountFilter}
+                                    ${highSubAmountFilter}
+                                    return distinct p`;
+                        }
+                        else if (isPerson == 1) {
+                            queryBody =
+                                `for v, e, p in 1..${DIDepth} outbound '${nodeCollectionName}/${code}' ${edgeCollectionName}
+                                    filter v.flag != 1 && e.flag != 1
+                                    ${isExtraFilter}
+                                    ${lowWeightFilter}
+                                    ${highWeightFilter}
+                                    ${lowSubAmountFilter}
+                                    ${highSubAmountFilter}
+                                    return distinct p`;
+                        }
+                        queryBody = queryBody.replace(/null/g, '');
                     }
                     else if (relation == 'guarantees') {
-                        queryBody = directGuaranteePathQuery;
+                        queryBody =
+                            `for v, e, p in 1..1 outbound '${nodeCollectionName}/${code}' ${edgeCollectionName} 
+                                filter v.flag != 1 && e.flag != 1 
+                                return distinct p`;
                     }
-                    if (!code) {
-                        console.error(`${code} is not in the neo4j database at all !`);
-                        logger.error(`${code} is not in the neo4j database at all !`);
-                        return reject({ error: `${code}=nodeId` });
-                    }
-                    else if (code) {
-                        let resultPromise = null;
+                    let resultPromise = null;
+                    //获取缓存
+                    let previousValue = null;
+                    if (cacheSwitch == 'on') {
                         let getCacheStart = Date.now();
-                        //获取缓存
-                        let previousValue = await cacheHandlers.getCache(cacheKey);
+                        previousValue = await cacheHandlers.getCache(cacheKey);
                         let getCacheCost = Date.now() - getCacheStart;
                         console.log('directInvestPath_getCacheCost: ' + getCacheCost + 'ms');
                         logger.info('directInvestPath_getCacheCost: ' + getCacheCost + 'ms');
-                        if (!previousValue) {
-                            let directInvestPathQueryStart = Date.now();
-                            // resultPromise = await session.run(queryBody);
-                            let retryCount = 0;
-                            // let resultPromise = null;
-                            do {
-                                try {
-                                    resultPromise = await sessionRun1(queryBody);
-                                    break;
-                                } catch (err) {
-                                    retryCount++;
-                                    console.error(err);
-                                    logger.error(err);
-                                }
-                            } while (retryCount < 3)
-                            if (retryCount == 3) {
-                                console.error('sessionRun1 execute fail after trying 3 times: ' +queryBody);
-                                logger.error('sessionRun1 execute fail after trying 3 times: ' +queryBody);
-                            } 
-                            console.log('query neo4j server: ' +queryBody);
-                            logger.info('query neo4j server: ' +queryBody);
-                            let directInvestPathQueryCost = Date.now() - directInvestPathQueryStart;
-                            logger.info(`${code} DirectInvestPathQueryCost: ` + directInvestPathQueryCost + 'ms');
-                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + `, ${code} DirectInvestPathQueryCost: ` + directInvestPathQueryCost + 'ms');
-                            if (resultPromise.records.length > 0) {
-                                let result = await handlerNeo4jResult(resultPromise, lowFund, highFund);
-                                let nodeResult = result.pathDetail.data.pathDetail;
-                                if (nodeResult.length > 0) {
-                                    let sortTreeResult = null;
-                                    // if (!personalCode) {
-                                    //     sortTreeResult = pathTreeHandlers.fromTreePath1(nodeResult, code, relation);
-                                    // }
-                                    // else if (personalCode != null) {
-                                    //     sortTreeResult = pathTreeHandlers.fromTreePath1(nodeResult, personalCode, relation);
-                                    // }
-                                    sortTreeResult = pathTreeHandlers.fromTreePath1(nodeResult, code, relation);
-
+                    }
+                    if (!previousValue) {
+                        let directInvestPathQueryStart = Date.now();
+                        let retryCount = 0;
+                        do {
+                            try {
+                                resultPromise = await executeQuery(queryBody);
+                                break;
+                            } catch (err) {
+                                retryCount++;
+                                console.error(err);
+                                logger.error(err);
+                            }
+                        } while (retryCount < 3)
+                        if (retryCount == 3) {
+                            console.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                            logger.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                        }
+                        console.log('query arangodb server: ' + queryBody);
+                        logger.info('query arangodb server: ' + queryBody);
+                        let directInvestPathQueryCost = Date.now() - directInvestPathQueryStart;
+                        logger.info(`${code} DirectInvestPathQueryCost: ` + directInvestPathQueryCost + 'ms');
+                        console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + `, ${code} DirectInvestPathQueryCost: ` + directInvestPathQueryCost + 'ms');
+                        if (resultPromise.length > 0) {
+                            let result = await handlerQueryResult1(resultPromise, j);
+                            let nodeResult = result.pathDetail.data.pathDetail;
+                            if (nodeResult.length > 0) {
+                                let sortTreeResult = null;
+                                sortTreeResult = pathTreeHandlers.fromTreePath1(nodeResult, code, relation);
+                                if (cacheSwitch == 'on') {
                                     cacheHandlers.setCache(cacheKey, JSON.stringify(sortTreeResult));
+                                }
+                                if (warmUpSwitch == 'on') {
                                     //根据预热条件的阈值判断是否要加入预热
-                                    let queryCostUp = config.warmUp_Condition.queryNeo4jCost;
-                                    let recordsUp = config.warmUp_Condition.queryNeo4jRecords;
-                                    if (directInvestPathQueryCost >= queryCostUp || resultPromise.records.length >= recordsUp) {
+                                    let queryCostUp = config.warmUp_Condition.queryCost;
+                                    let recordsUp = config.warmUp_Condition.queryRecords;
+                                    if (directInvestPathQueryCost >= queryCostUp || resultPromise.length >= recordsUp) {
                                         let conditionsKey = config.redisKeyName.warmUpITCodes;
                                         let conditionsField = code;
                                         let conditionsValue = { ITCode: code, depth: [DIDepth], modes: [j], relations: [relation] };                                        //0代表对外投资，1代表股东
                                         cacheHandlers.setWarmUpConditionsToRedis(conditionsKey, conditionsField, JSON.stringify(conditionsValue));
                                         cacheHandlers.setWarmUpPathsToRedis(warmUpKey, JSON.stringify(sortTreeResult));
                                     }
-                                    return resolve(sortTreeResult);
                                 }
-                                else if (nodeResult.length == 0) {
-                                    let treeResult = { subLeaf: [], subLeafNum: 0 };
-                                    cacheHandlers.setCache(cacheKey, JSON.stringify(treeResult));
-                                    return resolve(treeResult);
-                                }
+                                return resolve(sortTreeResult);
                             }
-                            else if (resultPromise.records.length == 0) {
-                                let treeResult = { subLeaf: [], subLeafNum: 0 };;
-                                cacheHandlers.setCache(cacheKey, JSON.stringify(treeResult));
+                            else if (nodeResult.length == 0) {
+                                let treeResult = { subLeaf: [], subLeafNum: 0 };
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(treeResult));
+                                }
                                 return resolve(treeResult);
                             }
                         }
-                        else if (previousValue) {
-                            return resolve(JSON.parse(previousValue));
+                        else if (resultPromise.length == 0) {
+                            let treeResult = { subLeaf: [], subLeafNum: 0 };
+                            if (cacheSwitch == 'on') {
+                                cacheHandlers.setCache(cacheKey, JSON.stringify(treeResult));
+                            }
+                            return resolve(treeResult);
                         }
+                    }
+                    else if (previousValue) {
+                        return resolve(JSON.parse(previousValue));
                     }
                 }
                 else if (warmUpValue) {
@@ -1050,140 +384,152 @@ let searchGraph = {
                     logger.info('get the warmUpValue from redis, the key is: ' + warmUpKey);
                     return resolve(warmUpValue);
                 }
-
             } catch (err) {
                 console.error('queryDirectInvestPathError: ' + err);
                 logger.error('queryDirectInvestPathError: ' + err);
-                // driver.close();
-                // session.close();
                 return reject(err);
             }
         })
-        // .timeout(lookupTimeout).catch( err => {
-        //     console.log(err);
-        //     logger.info(err);
-        //     // return reject(err);
-        // });                                                                                 //超时设置15s
     },
 
     //单个企业直接被投资关系路径查询
-    queryDirectInvestedByPath: async function (code, relation, DIBDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches) {
+    queryDirectInvestedByPath: async function (code, relation, DIBDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra) {
         return new Promise(async function (resolve, reject) {
 
             try {
-                let j = 1;                                                                            //1代表DirectInvestedBy
-                //先从redis中预热的数据中查询是否存在预热值
+                let j = 7;                                                                            //1代表DirectInvestedBy
                 let warmUpKey = [code, DIBDepth, lowWeight, highWeight, lowSubAmountRMB, highSubAmountRMB, j, relation].join('-');
-                let warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
-                let cacheKey = [j, code, relation, DIBDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra, isBranches].join('-');
+                let cacheKey = [j, code, relation, DIBDepth, lowWeight, highWeight, lowFund, highFund, lowSubAmountRMB, highSubAmountRMB, isExtra].join('-');
+                let warmUpValue = null;
+                if (warmUpSwitch == 'on') {
+                    //先从redis中预热的数据中查询是否存在预热值
+                    warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
+                }
                 if (!warmUpValue) {
-                    // let nodeId = await findNodeId(code);
                     let queryBody = null;
-                    let directGuaranteedByPathQuery = null;
-                    let directInvestedByPathQuery = null;
-
-                    //for test
-                    // surStatus = 0;
-
-                    if (isExtra == 0 || isExtra == '0') {                                                              //过滤没有机构代码的nodes
-                        // if (isBranches == 0 || isBranches == '0') {                                                    //过滤分支机构
-                        //     directGuaranteedByPathQuery = `start from=node(${nodeId}) match p= (from)<-[r:guarantees}]-(to) where from.isExtra = '0' and to.isExtra = '0' and from.isBranches = '0' and to.isBranches = '0' return p`;
-                        //     directInvestedByPathQuery = `start from=node(${nodeId}) match p= (from)<-[r:invests*..${DIBDepth}]-(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0' and from.isBranches = '0' and to.isBranches = '0') return p`;
-                        // } else {
-                        //     directGuaranteedByPathQuery = `start from=node(${nodeId}) match p= (from)<-[r:guarantees]-(to) where from.isExtra = '0' and to.isExtra = '0' return p`;
-                        //     directInvestedByPathQuery = `start from=node(${nodeId}) match p= (from)<-[r:invests*..${DIBDepth}]-(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0') return p`;
-                        // }
-
-                        directGuaranteedByPathQuery = `match p= (from:company{ITCode2: '${code}'})<-[r:guarantees]-(to) where from.isExtra = '0' and to.isExtra = '0' return p`;
-                        directInvestedByPathQuery = `match p= (from:company{ITCode2: '${code}'})<-[r:invests*..${DIBDepth}]-(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isExtra = '0' and to.isExtra = '0') return p`;
-                    } else {
-                        // if (isBranches == 0 || isBranches == '0') {
-                        //     directGuaranteedByPathQuery = `start from=node(${nodeId}) match p= (from)<-[r:guarantees]-(to) where from.isBranches = '0' and to.isBranches = '0' return p`;
-                        //     directInvestedByPathQuery = `start from=node(${nodeId}) match p= (from)<-[r:invests*..${DIBDepth}]-(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB} and from.isBranches = '0' and to.isBranches = '0') return p`;
-                        // } else {
-                        //     directGuaranteedByPathQuery = `start from=node(${nodeId}) match p= (from)<-[r:guarantees]-(to) return p`;
-                        //     directInvestedByPathQuery = `start from=node(${nodeId}) match p= (from)<-[r:invests*..${DIBDepth}]-(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB}) return p`;
-                        // }
-                        directGuaranteedByPathQuery = `match p= (from:company{ITCode2: '${code}'})<-[r:guarantees]-(to) return p`;
-                        directInvestedByPathQuery = `match p= (from:company{ITCode2: '${code}'})<-[r:invests*..${DIBDepth}]-(to) where all(rel in r where rel.weight >= ${lowWeight} and rel.weight <= ${highWeight} and rel.subAmountRMB >= ${lowSubAmountRMB} and rel.subAmountRMB <= ${highSubAmountRMB}) return p`;
-                    }
+                    let isExtraFilter = null;
+                    let lowFundFilter = null;
+                    let highFundFilter = null;
+                    let lowWeightFilter = null;
+                    let highWeightFilter = null;
+                    let lowSubAmountFilter = null;
+                    let highSubAmountFilter = null;
+                    let nodeCollectionName = config.arangodbInfo.nodeCollectionName;
+                    let edgeCollectionName = config.arangodbInfo.edgeCollectionName[`${relation}`];
 
                     if (relation == 'invests') {
-                        queryBody = directInvestedByPathQuery;
+                        if (isExtra == 0 || isExtra == '0') {
+                            isExtraFilter = 'filter v.isExtra == 0';
+                        }
+                        if (lowFund) {
+                            lowFundFilter = `filter v.RMBFund >= ${lowFund}`;
+                        }
+                        if (highFund) {
+                            highFundFilter = `filter v.RMBFund <= ${highFund}`;
+                        }
+                        if (lowWeight) {
+                            lowWeightFilter = `filter e.weight >= ${lowWeight}`;
+                        }
+                        if (highWeight) {
+                            highWeightFilter = `filter e.weight <= ${highWeight}`;
+                        }
+                        if (lowSubAmountRMB) {
+                            lowSubAmountFilter = `filter e.subAmountRMB >= ${lowSubAmountRMB}`;
+                        }
+                        if (highSubAmountRMB) {
+                            highSubAmountFilter = `filter e.subAmountRMB <= ${highSubAmountRMB}`;
+                        }
+                        queryBody =
+                            `for v, e, p in 1..${DIBDepth} inbound '${nodeCollectionName}/${code}' ${edgeCollectionName}
+                                filter v.flag != 1 && e.flag != 1
+                                ${isExtraFilter}
+                                ${lowFundFilter}
+                                ${highFundFilter}
+                                ${lowWeightFilter}
+                                ${highWeightFilter}
+                                ${lowSubAmountFilter}
+                                ${highSubAmountFilter}
+                                return distinct p`;
+                        queryBody = queryBody.replace(/null/g, '');
                     }
                     else if (relation == 'guarantees') {
-                        queryBody = directGuaranteedByPathQuery;
+                        queryBody =
+                            `for v, e, p in 1..1 inbound '${nodeCollectionName}/${code}' ${edgeCollectionName} 
+                                filter v.flag != 1 && e.flag != 1 
+                                return distinct p`;
                     }
-                    if (!code) {
-                        console.error(`${code} is not in the neo4j database at all !`);
-                        logger.error(`${code} is not in the neo4j database at all !`);
-                        return reject({ error: `${code}=nodeId` });
-                    }
-                    else if (code) {
-                        let resultPromise = null;
+                    let resultPromise = null;
+                    let previousValue = null;
+                    if (cacheSwitch == 'on') {
                         let getCacheStart = Date.now();
                         //获取缓存
-                        let previousValue = await cacheHandlers.getCache(cacheKey);
+                        previousValue = await cacheHandlers.getCache(cacheKey);
                         let getCacheCost = Date.now() - getCacheStart;
                         console.log('directInvestedByPath_getCacheCost: ' + getCacheCost + 'ms');
                         logger.info('directInvestedByPath_getCacheCost: ' + getCacheCost + 'ms');
-                        if (!previousValue) {
-                            let directInvestedByPathQueryStart = Date.now();
-                            // resultPromise = await session.run(queryBody);
-                            let retryCount = 0;
-                            // let resultPromise = null;
-                            do {
-                                try {
-                                    resultPromise = await sessionRun2(queryBody);
-                                    break;
-                                } catch (err) {
-                                    retryCount++;
-                                    console.error(err);
-                                    logger.error(err);
-                                }
-                            } while (retryCount < 3)
-                            if (retryCount == 3) {
-                                console.error('sessionRun2 execute fail after trying 3 times: ' +queryBody);
-                                logger.error('sessionRun2 execute fail after trying 3 times: ' +queryBody);
-                            } 
-                            console.log('query neo4j server: ' +queryBody);
-                            logger.info('query neo4j server: ' +queryBody);
-                            let directInvestedByPathQueryCost = Date.now() - directInvestedByPathQueryStart;
-                            logger.info(`${code} directInvestedByPathQueryCost: ` + directInvestedByPathQueryCost + 'ms');
-                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + `, ${code} directInvestedByPathQueryCost: ` + directInvestedByPathQueryCost + 'ms');
-                            if (resultPromise.records.length > 0) {
-                                let result = await handlerNeo4jResult(resultPromise, lowFund, highFund);
-                                let nodeResult = result.pathDetail.data.pathDetail;
-                                if (nodeResult.length > 0) {
-                                    let sortTreeResult = pathTreeHandlers.fromTreePath2(nodeResult, code, relation);
+                    }
+                    if (!previousValue) {
+                        let directInvestedByPathQueryStart = Date.now();
+                        let retryCount = 0;
+                        do {
+                            try {
+                                resultPromise = await executeQuery(queryBody);
+                                break;
+                            } catch (err) {
+                                retryCount++;
+                                console.error(err);
+                                logger.error(err);
+                            }
+                        } while (retryCount < 3)
+                        if (retryCount == 3) {
+                            console.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                            logger.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                        }
+                        console.log('query arangodb server: ' + queryBody);
+                        logger.info('query arangodb server: ' + queryBody);
+                        let directInvestedByPathQueryCost = Date.now() - directInvestedByPathQueryStart;
+                        logger.info(`${code} directInvestedByPathQueryCost: ` + directInvestedByPathQueryCost + 'ms');
+                        console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + `, ${code} directInvestedByPathQueryCost: ` + directInvestedByPathQueryCost + 'ms');
+                        if (resultPromise.length > 0) {
+                            let result = await handlerQueryResult(resultPromise, j);
+                            let nodeResult = result.pathDetail.data.pathDetail;
+                            if (nodeResult.length > 0) {
+                                let sortTreeResult = pathTreeHandlers.fromTreePath2(nodeResult, code, relation);
+                                if (cacheSwitch == 'on') {
                                     cacheHandlers.setCache(cacheKey, JSON.stringify(sortTreeResult));
+                                }
+                                if (warmUpSwitch == 'on') {
                                     //根据预热条件的阈值判断是否要加入预热
-                                    let queryCostUp = config.warmUp_Condition.queryNeo4jCost;
-                                    let recordsUp = config.warmUp_Condition.queryNeo4jRecords;
-                                    if (directInvestedByPathQueryCost >= queryCostUp || resultPromise.records.length >= recordsUp) {
+                                    let queryCostUp = config.warmUp_Condition.queryCost;
+                                    let recordsUp = config.warmUp_Condition.queryRecords;
+                                    if (directInvestedByPathQueryCost >= queryCostUp || resultPromise.length >= recordsUp) {
                                         let conditionsKey = config.redisKeyName.warmUpITCodes;
                                         let conditionsField = code;
                                         let conditionsValue = { ITCode: code, depth: [DIBDepth], modes: [j], relations: [relation] };                                        //0代表对外投资，1代表股东
                                         cacheHandlers.setWarmUpConditionsToRedis(conditionsKey, conditionsField, JSON.stringify(conditionsValue));
                                         cacheHandlers.setWarmUpPathsToRedis(warmUpKey, JSON.stringify(sortTreeResult));
                                     }
-                                    return resolve(sortTreeResult);
                                 }
-                                else if (nodeResult.length == 0) {
-                                    let treeResult = { subLeaf: [], subLeafNum: 0 };
-                                    cacheHandlers.setCache(cacheKey, JSON.stringify(treeResult));
-                                    return resolve(treeResult);
-                                }
+                                return resolve(sortTreeResult);
                             }
-                            else if (resultPromise.records.length == 0) {
+                            else if (nodeResult.length == 0) {
                                 let treeResult = { subLeaf: [], subLeafNum: 0 };
-                                cacheHandlers.setCache(cacheKey, JSON.stringify(treeResult));
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(treeResult));
+                                }
                                 return resolve(treeResult);
                             }
                         }
-                        else if (previousValue) {
-                            return resolve(JSON.parse(previousValue));
+                        else if (resultPromise.length == 0) {
+                            let treeResult = { subLeaf: [], subLeafNum: 0 };
+                            if (cacheSwitch == 'on') {
+                                cacheHandlers.setCache(cacheKey, JSON.stringify(treeResult));
+                            }
+                            return resolve(treeResult);
                         }
+                    }
+                    else if (previousValue) {
+                        return resolve(JSON.parse(previousValue));
                     }
                 }
                 else if (warmUpValue) {
@@ -1196,18 +542,1136 @@ let searchGraph = {
             } catch (err) {
                 console.error('queryDirectInvestedByPathError: ' + err);
                 logger.error('queryDirectInvestedByPathError: ' + err);
-                // driver.close();
-                // session.close();
                 return reject(err);
             }
         })
-        // .timeout(lookupTimeout).catch( err => {
-        //     console.log(err);
-        //     logger.info(err);
-        //     // return reject(err);
-        // });                                                                  //超时设置15s
-    }
+    },
 
+    //直接投资关系的路径查询
+    queryInvestPath: async function (from, to, IVDepth, lowWeight, highWeight, pathType) {
+        return new Promise(async function (resolve, reject) {
+
+            try {
+                let fromIsPerson = 0;
+                let toIsPerson = 0;
+                if (from.indexOf('P') >= 0) {
+                    fromIsPerson = 1;
+                }
+                if (to.indexOf('P') >= 0) {
+                    toIsPerson = 1;
+                }
+                let j = 0; 
+                let warmUpKey = [from, to, IVDepth, j, pathType].join('-');
+                let cacheKey = [j, from, to, IVDepth, lowWeight, highWeight, pathType].join('-');
+                //记录每种路径查询方式索引号,investPathQuery索引为0
+                let warmUpValue = null;
+                if (warmUpSwitch == 'on') {
+                    //先从redis中预热的数据中查询是否存在预热值
+                    warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
+                }
+                if (!warmUpValue) {
+                    if (from == null || to == null) {
+                        console.error(`${from} or ${to} is not in the database at all !`);
+                        logger.error(`${from} or ${to} is not in the database at all !`);
+                        let nodeResults = {
+                            nodeResultOne: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${j}`, typeName: 'InvestPath', names: [], codes: [] } },
+                            nodeResultTwo: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_10`, typeName: 'guarantees', names: [], codes: [] } },
+                            nodeResultThree: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_11`, typeName: 'family', names: [], codes: [] } }
+                        };
+                        return resolve(nodeResults);
+                    }
+                    else if (from != null && to != null) {
+                        let queryBody = null;
+                        let lowWeightFilter = null;
+                        let highWeightFilter = null;
+                        let edgeCollectionName = null;
+                        if (lowWeight) {
+                            lowWeightFilter = `filter e.weight >= ${lowWeight}`;
+                        }
+                        if (highWeight) {
+                            highWeightFilter = `filter e.weight <= ${highWeight}`;
+                        }
+                        let nodeCollectionName = config.arangodbInfo.nodeCollectionName;
+                        let invest = config.arangodbInfo.edgeCollectionName.invests;
+                        let family = config.arangodbInfo.edgeCollectionName.family;
+                        let guanrantee = config.arangodbInfo.edgeCollectionName.guarantees;
+                        let queryFirst =
+                                        `
+                                        let from = '${nodeCollectionName}/${from}'
+                                        let to = '${nodeCollectionName}/${to}'
+                                        for v, e in 1..2 outbound from ${invest}
+                                            filter v.flag != 1 && e.flag != 1
+                                            collect with count into lf
+                                        for v, e in 1..2 inbound to ${invest}
+                                            filter v.flag != 1 && e.flag != 1
+                                            collect with count into lt
+                                        let s = (lf <= lt ? '${from}' : '${to}')
+                                        let t = (lf > lt ? '${from}' : '${to}')
+                                        let direction = (lf <= lt ? 'outbound' : 'inbound')
+                                        return {s, t, lf, lt, direction}
+                                        `;
+                        console.log('queryFirst: ', queryFirst);
+                        logger.info('queryFirst: ', queryFirst);
+                        let queryFirstStart = Date.now();
+                        let retryCount = 0;
+                        let resultOne = null;
+                        do {
+                            try {
+                                resultOne = await executeQuery(queryFirst);
+                                break;
+                            } catch (err) {
+                                retryCount++;
+                                console.error(err);
+                                logger.error(err);
+                                return reject(err);
+                            }
+                        } while (retryCount < 3)
+                        if (retryCount == 3) {
+                            console.error('queryFirst execute fail after trying 3 times: ' + queryBody);
+                            logger.error('queryFirst execute fail after trying 3 times: ' + queryBody);
+                        }
+                        let queryFirstCost = Date.now() - queryFirstStart;
+                        let source = null;
+                        let target = null;
+                        let direction = null;
+                        if (resultOne.length > 0 && resultOne[0].hasOwnProperty('direction')) {
+                            source = resultOne[0].s;
+                            target = resultOne[0].t;
+                            sourceLen = resultOne[0].lf;
+                            targetLen = resultOne[0].lt;
+                            direction = resultOne[0].direction;
+                            console.log(`source: ${source}, sourceLen: ${sourceLen}, target: ${target}, targetLen: ${targetLen}, direction is: ${direction}, queryFirstCost: ${queryFirstCost} ms`);
+                            logger.info(`source: ${source}, sourceLen: ${sourceLen}, target: ${target}, targetLen: ${targetLen}, direction is: ${direction}, queryFirstCost: ${queryFirstCost} ms`);
+                        }
+                        else {
+                            console.error('queryFirst failure!');
+                            logger.error('queryFirst failure!');
+                            return reject(err);
+                        }
+                        if (pathType == 'invests' || !pathType) {
+                            edgeCollectionName = invest;
+
+                        }
+                        else if (pathType == 'all') {
+                            //from/to均为自然人时只找family关系
+                            if (fromIsPerson == 1 && toIsPerson == 1) {
+                                edgeCollectionName = family;
+
+                            }
+                            else if (fromIsPerson == 1 || toIsPerson == 1) {
+                                edgeCollectionName = `${invest}, any ${family}, ${guanrantee}`;
+                            }
+
+                            else if (fromIsPerson != 1 && toIsPerson != 1) {
+                                edgeCollectionName = `${invest}, ${guanrantee}`;
+                            }
+                        }
+                        queryBody =
+                                    `
+                                    for source in nodes
+                                        filter source.flag != 1
+                                        filter source._key == '${source}'
+                                        limit 1
+                                    for v, e, p
+                                        in 1..${IVDepth} ${direction} source
+                                        ${edgeCollectionName}
+                                        filter v.flag != 1 && e.flag != 1
+                                        filter p.edges[*].flag all != 1
+                                        filter v._key == '${target}'
+                                        ${lowWeightFilter}
+                                        ${highWeightFilter}
+                                        return distinct p
+                                    `;
+                        queryBody = queryBody.replace(/null/g, '');
+
+                        let now = 0;
+                        let previousValue = null;
+                        if (cacheSwitch == 'on') {
+                            //缓存
+                            previousValue = await cacheHandlers.getCache(cacheKey);
+                        }
+                        if (!previousValue) {
+                            now = Date.now();
+                            let retryCountThree = 0;
+                            let resultPromise = null;
+                            do {
+                                try {
+                                    resultPromise = await executeQuery(queryBody);
+                                    break;
+                                } catch (err) {
+                                    retryCountThree++;
+                                    console.error(err);
+                                    logger.error(err);
+                                }
+                            } while (retryCountThree < 3)
+                            if (retryCountThree == 3) {
+                                console.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                                logger.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                            }
+                            console.log('query arangodb server: ' + queryBody);
+                            logger.info('query arangodb server: ' + queryBody);
+                            let investPathQueryCost = Date.now() - now;
+                            logger.info(`from: ${from} to: ${to}` + " InvestPathQueryCost: " + investPathQueryCost + 'ms');
+                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ` from: ${from} to: ${to}` + ", InvestPathQueryCost: " + investPathQueryCost + 'ms');
+                            if (resultPromise.length > 0) {
+                                let result = await handlerQueryResult2(from, to, resultPromise, j);
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(result));
+                                }
+                                if (warmUpSwitch == 'on') {
+                                    //根据预热条件的阈值判断是否要加入预热
+                                    let queryCostUp = config.warmUp_Condition.queryCost;
+                                    let recordsUp = config.warmUp_Condition.queryRecords;
+                                    if (investPathQueryCost >= queryCostUp || resultPromise.length >= recordsUp) {
+                                        let conditionsKey = config.redisKeyName.conditionsKey;
+                                        let conditionsField = [from, to].join('->');
+                                        let conditionsValue = { from: from, to: to, depth: [IVDepth], relations: [j], cost: investPathQueryCost };
+                                        cacheHandlers.setWarmUpConditionsToRedis(conditionsKey, conditionsField, JSON.stringify(conditionsValue));
+                                        cacheHandlers.setWarmUpPathsToRedis(warmUpKey, JSON.stringify(result));
+                                    }
+                                }
+                                return resolve(result);
+                            }
+                            else if (resultPromise.records.length == 0) {
+                                let nodeResults = {
+                                    nodeResultOne: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${j}`, typeName: 'InvestPath', names: [], codes: [] } },
+                                    nodeResultTwo: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_10`, typeName: 'guarantees', names: [], codes: [] } },
+                                    nodeResultThree: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_11`, typeName: 'family', names: [], codes: [] } }
+                                };
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(nodeResults));
+                                }
+                                return resolve(nodeResults);
+                            }
+                        }
+                        else if (previousValue) {
+                            return resolve(JSON.parse(previousValue));
+                        }
+                    }
+                }
+                else if (warmUpValue) {
+                    warmUpValue = JSON.parse(warmUpValue);
+                    console.log('get the warmUpValue from redis, the key is: ' + warmUpKey);
+                    logger.info('get the warmUpValue from redis, the key is: ' + warmUpKey);
+                    return resolve(warmUpValue);
+                }
+
+            } catch (err) {
+                console.error(err);
+                logger.error(err);
+                return reject(err);
+            }
+        })
+    },
+
+    //直接被投资关系的路径查询
+    queryInvestedByPath: async function (from, to, IVBDepth, lowWeight, highWeight, pathType) {
+        return new Promise(async function (resolve, reject) {
+
+            try {
+                let fromIsPerson = 0;
+                let toIsPerson = 0;
+                if (from.indexOf('P') >= 0) {
+                    fromIsPerson = 1;
+                }
+                if (to.indexOf('P') >= 0) {
+                    toIsPerson = 1;
+                }
+                let j = 1;                                                            //记录每种路径查询方式索引号,investByPathQuery索引为1
+                let warmUpKey = [from, to, IVBDepth, j, pathType].join('-');
+                let cacheKey = [j, from, to, IVBDepth, lowWeight, highWeight, pathType].join('-');
+                let warmUpValue = null;
+                if (warmUpSwitch == 'on') {
+                    //先从redis中预热的数据中查询是否存在预热值
+                    warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
+                }
+                if (!warmUpValue) {
+                    if (from == null || to == null) {
+                        console.error(`${from} or ${to} is not in the database at all !`);
+                        logger.error(`${from} or ${to} is not in the database at all !`);
+                        let nodeResults = {
+                            nodeResultOne: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${j}`, typeName: 'InvestedByPath', names: [], codes: [] } },
+                            nodeResultTwo: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_10`, typeName: 'guarantees', names: [], codes: [] } },
+                            nodeResultThree: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_11`, typeName: 'family', names: [], codes: [] } }
+                        };
+                        return resolve(nodeResults);
+                    }
+                    else if (from != null && to != null) {
+                        let queryBody = null;
+                        let lowWeightFilter = null;
+                        let highWeightFilter = null;
+                        let edgeCollectionName = null;
+                        if (lowWeight) {
+                            lowWeightFilter = `filter e.weight >= ${lowWeight}`;
+                        }
+                        if (highWeight) {
+                            highWeightFilter = `filter e.weight <= ${highWeight}`;
+                        }
+                        let nodeCollectionName = config.arangodbInfo.nodeCollectionName;
+                        let invest = config.arangodbInfo.edgeCollectionName.invests;
+                        let family = config.arangodbInfo.edgeCollectionName.family;
+                        let guanrantee = config.arangodbInfo.edgeCollectionName.guarantees;
+                        let queryFirst =
+                                        `
+                                        let from = '${nodeCollectionName}/${from}'
+                                        let to = '${nodeCollectionName}/${to}'
+                                        for v, e in 1..2 inbound from ${invest}
+                                            filter v.flag != 1 && e.flag != 1
+                                            collect with count into lf
+                                        for v, e in 1..2 outbound to ${invest}
+                                            filter v.flag != 1 && e.flag != 1
+                                            collect with count into lt
+                                        let s = (lf <= lt ? '${from}' : '${to}')
+                                        let t = (lf > lt ? '${from}' : '${to}')
+                                        let direction = (lf <= lt ? 'inbound' : 'outbound')
+                                        return {s, t, lf, lt, direction}
+                                        `;
+                        console.log('queryFirst: ', queryFirst);
+                        logger.info('queryFirst: ', queryFirst);
+                        let queryFirstStart = Date.now();
+                        let retryCount = 0;
+                        let resultOne = null;
+                        do {
+                            try {
+                                resultOne = await executeQuery(queryFirst);
+                                break;
+                            } catch (err) {
+                                retryCount++;
+                                console.error(err);
+                                logger.error(err);
+                                return reject(err);
+                            }
+                        } while (retryCount < 3)
+                        if (retryCount == 3) {
+                            console.error('queryFirst execute fail after trying 3 times: ' + queryBody);
+                            logger.error('queryFirst execute fail after trying 3 times: ' + queryBody);
+                        }
+                        let queryFirstCost = Date.now() - queryFirstStart;
+                        let source = null;
+                        let target = null;
+                        let direction = null;
+                        if (resultOne.length > 0 && resultOne[0].hasOwnProperty('direction')) {
+                            source = resultOne[0].s;
+                            target = resultOne[0].t;
+                            sourceLen = resultOne[0].lf;
+                            targetLen = resultOne[0].lt;
+                            direction = resultOne[0].direction;
+                            console.log(`source: ${source}, sourceLen: ${sourceLen}, target: ${target}, targetLen: ${targetLen}, direction is: ${direction}, queryFirstCost: ${queryFirstCost} ms`);
+                            logger.info(`source: ${source}, sourceLen: ${sourceLen}, target: ${target}, targetLen: ${targetLen}, direction is: ${direction}, queryFirstCost: ${queryFirstCost} ms`);
+                        }
+                        else {
+                            console.error('queryFirst failure!');
+                            logger.error('queryFirst failure!');
+                            return reject(err);
+                        }
+                        if (pathType == 'invests' || !pathType) {
+                            edgeCollectionName = invest;
+                        }
+                        else if (pathType == 'all') {
+                            //from/to均为自然人时只找family关系
+                            if (fromIsPerson == 1 && toIsPerson == 1) {
+                                edgeCollectionName = family;
+                            }
+                            else if (fromIsPerson == 1 || toIsPerson == 1) {
+                                edgeCollectionName = `${invest}, any ${family}, ${guanrantee}`;
+                            }
+                            else if (fromIsPerson != 1 && toIsPerson != 1) {
+                                edgeCollectionName = `${invest}, ${guanrantee}`;
+                            }
+                        }
+                        queryBody =
+                                    `
+                                    for source in nodes
+                                        filter source.flag != 1
+                                        filter source._key == '${source}'
+                                        limit 1
+                                    for v, e, p
+                                        in 1..${IVBDepth} ${direction} source
+                                        ${edgeCollectionName}
+                                        filter v.flag != 1 && e.flag != 1
+                                        filter p.edges[*].flag all != 1
+                                        filter v._key == '${target}'
+                                        ${lowWeightFilter}
+                                        ${highWeightFilter}
+                                        return distinct p
+                                    `;
+                        queryBody = queryBody.replace(/null/g, '');             
+
+                        let now = 0;
+                        let previousValue = null;
+                        if (cacheSwitch == 'on') {
+                            //缓存
+                            previousValue = await cacheHandlers.getCache(cacheKey);
+                        }
+                        if (!previousValue) {
+                            now = Date.now();
+                            let retryCountThree = 0;
+                            let resultPromise = null;
+                            do {
+                                try {
+                                    resultPromise = await executeQuery(queryBody);
+                                    break;
+                                } catch (err) {
+                                    retryCountThree++;
+                                    console.error(err);
+                                    logger.error(err);
+                                }
+                            } while (retryCountThree < 3)
+                            if (retryCountThree == 3) {
+                                console.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                                logger.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                            }
+                            console.log('query arangodb server: ' + queryBody);
+                            logger.info('query arangodb server: ' + queryBody);
+                            let investedByPathQueryCost = Date.now() - now;
+                            logger.info(`from: ${from} to: ${to}` + " InvestedByPathQueryCost: " + investedByPathQueryCost + 'ms');
+                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ` from: ${from} to: ${to}` + ", InvestedByPathQueryCost: " + investedByPathQueryCost + 'ms');
+                            if (resultPromise.length > 0) {
+                                let result = await handlerQueryResult2(from, to, resultPromise, j);
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(result));
+                                }
+                                if (warmUpSwitch == 'on') {
+                                    //根据预热条件的阈值判断是否要加入预热
+                                    let queryCostUp = config.warmUp_Condition.queryCost;
+                                    let recordsUp = config.warmUp_Condition.queryRecords;
+                                    if (investedByPathQueryCost >= queryCostUp || resultPromise.length >= recordsUp) {
+                                        let conditionsKey = config.redisKeyName.conditionsKey;
+                                        let conditionsField = [from, to].join('->');
+                                        let conditionsValue = { from: from, to: to, depth: [IVBDepth], relations: [j], cost: investedByPathQueryCost };
+                                        cacheHandlers.setWarmUpConditionsToRedis(conditionsKey, conditionsField, JSON.stringify(conditionsValue));
+                                        cacheHandlers.setWarmUpPathsToRedis(warmUpKey, JSON.stringify(result));
+                                    }
+                                }
+                                return resolve(result);
+                            }
+                            else if (resultPromise.length == 0) {
+                                let nodeResults = {
+                                    nodeResultOne: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${j}`, typeName: 'InvestedByPath', names: [], codes: [] } },
+                                    nodeResultTwo: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_10`, typeName: 'guarantees', names: [], codes: [] } },
+                                    nodeResultThree: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_11`, typeName: 'family', names: [], codes: [] } }
+                                };
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(nodeResults));
+                                }
+                                return resolve(nodeResults);
+                            }
+                        }
+                        else if (previousValue) {
+                            return resolve(JSON.parse(previousValue));
+                        }
+                    }
+                }
+                else if (warmUpValue) {
+                    warmUpValue = JSON.parse(warmUpValue);
+                    console.log('get the warmUpValue from redis, the key is: ' + warmUpKey);
+                    logger.info('get the warmUpValue from redis, the key is: ' + warmUpKey);
+                    return resolve(warmUpValue);
+                }
+            } catch (err) {
+                console.error(err);
+                logger.error(err);
+                return reject(err);
+            }
+        })
+    },
+
+    //共同投资关系路径查询
+    queryCommonInvestPath: async function (from, to, CIVDepth, lowWeight, highWeight, pathType) {
+        return new Promise(async function (resolve, reject) {
+
+            try {
+                let j = 4;
+                let warmUpKey = [from, to, CIVDepth, j, pathType].join('-');
+                let cacheKey = [j, from, to, CIVDepth, lowWeight, highWeight, pathType].join('-');
+                let warmUpValue = null;
+                if (warmUpSwitch == 'on') {
+                    //先从redis中预热的数据中查询是否存在预热值
+                    warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
+                }
+                if (!warmUpValue) {
+                    if (from == null || to == null) {
+                        console.error(`${from} or ${to} is not in the database at all !`);
+                        logger.error(`${from} or ${to} is not in the database at all !`);
+                        let nodeResults = {
+                            nodeResultOne: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${j}`, typeName: 'CommonInvestPath', names: [], codes: [] } },
+                            nodeResultTwo: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_10`, typeName: 'guarantees', names: [], codes: [] } },
+                            nodeResultThree: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_11`, typeName: 'family', names: [], codes: [] } }
+                        };
+                        return resolve(nodeResults);
+                    }
+                    else if (from != null && to != null) {
+                        let lowWeightFilter = null;
+                        let highWeightFilter = null;
+                        let edgeCollectionName = null;
+                        if (lowWeight) {
+                            lowWeightFilter = `filter e.weight >= ${lowWeight}`;
+                        }
+                        if (highWeight) {
+                            highWeightFilter = `filter e.weight <= ${highWeight}`;
+                        }
+                        let invest = config.arangodbInfo.edgeCollectionName.invests;
+                        let family = config.arangodbInfo.edgeCollectionName.family;
+                        let guanrantee = config.arangodbInfo.edgeCollectionName.guarantees;
+                        if (pathType == 'invests' || !pathType) {
+                            edgeCollectionName = invest;
+                        }
+                        else if (pathType == 'all') {
+                            edgeCollectionName = `${invest}, ${guanrantee}, any ${family}`;
+                        }
+                        let queryBody =
+                                        `
+                                        let from = 'nodes/${from}'
+                                        let to = 'nodes/${to}'
+                                        for v1, e1, p1 in 1..${CIVDepth/2} outbound from
+                                            ${edgeCollectionName}
+                                            filter v1.flag != 1 && e1.flag != 1
+                                            filter p1.edges[*].flag all != 1
+                                            ${lowWeightFilter}
+                                            ${highWeightFilter}
+                                            for v2, e2, p2 in 1..${CIVDepth/2} outbound to
+                                                ${edgeCollectionName}
+                                                filter v2.flag != 1 && e2.flag != 1
+                                                filter p2.edges[*].flag all != 1
+                                                ${lowWeightFilter}
+                                                ${highWeightFilter}
+                                                filter e1._to == e2._to
+                                                return distinct {'edges': append(p1.edges, p2.edges), 'vertices': append(p1.vertices, p2.vertices)}                                        `;
+                        queryBody = queryBody.replace(/null/g, '');  
+                        let now = 0;
+                        let previousValue = null;
+                        if (cacheSwitch == 'on') {
+                            //缓存
+                            previousValue = await cacheHandlers.getCache(cacheKey);
+                        }
+                        if (!previousValue) {
+                            let commonInvestPathQueryCost = 0;
+                            now = Date.now();
+                            let retryCountThree = 0;
+                            let resultPromise = null;
+                            do {
+                                try {
+                                    resultPromise = await executeQuery(queryBody);
+                                    break;
+                                } catch (err) {
+                                    retryCountThree++;
+                                    console.error(err);
+                                    logger.error(err);
+                                }
+                            } while (retryCountThree < 3)
+                            if (retryCountThree == 3) {
+                                console.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                                logger.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                            }
+                            console.log('query arangodb server: ' + queryBody);
+                            logger.info('query arangodb server: ' + queryBody);
+                            commonInvestPathQueryCost = Date.now() - now;
+                            logger.info(`from: ${from} to: ${to}` + " CommonInvestPathQueryCost: " + commonInvestPathQueryCost + 'ms');
+                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ` from: ${from} to: ${to}` + ", CommonInvestPathQueryCost: " + commonInvestPathQueryCost + 'ms');
+                            if (resultPromise.length > 0) {
+                                logger.info(`from: ${from} to: ${to}` + " CommonInvestPathQueryCost: " + commonInvestPathQueryCost + 'ms');
+                                let result = await handlerQueryResult2(from, to, resultPromise, j);
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(result));
+                                }
+                                if (warmUpSwitch == 'on') {
+                                    //根据预热条件的阈值判断是否要加入预热
+                                    let queryCostUp = config.warmUp_Condition.queryCost;
+                                    let recordsUp = config.warmUp_Condition.queryRecords;
+                                    if (commonInvestPathQueryCost >= queryCostUp || resultPromise.length >= recordsUp) {
+                                        let conditionsKey = config.redisKeyName.conditionsKey;
+                                        let conditionsField = [from, to].join('->');
+                                        let conditionsValue = { from: from, to: to, depth: [CIVDepth], relations: [j], cost: commonInvestPathQueryCost };
+                                        cacheHandlers.setWarmUpConditionsToRedis(conditionsKey, conditionsField, JSON.stringify(conditionsValue));
+                                        cacheHandlers.setWarmUpPathsToRedis(warmUpKey, JSON.stringify(result));
+                                    }
+                                }
+                                return resolve(result);
+                            } else if (resultPromise.records.length == 0) {
+                                let nodeResults = {
+                                    nodeResultOne: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${j}`, typeName: 'CommonInvestPath', names: [], codes: [] } },
+                                    nodeResultTwo: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_10`, typeName: 'guarantees', names: [], codes: [] } },
+                                    nodeResultThree: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_11`, typeName: 'family', names: [], codes: [] } }
+                                };
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(nodeResults));
+                                }
+                                return resolve(nodeResults);
+                            }
+                        }
+                        else if (previousValue) {
+                            return resolve(JSON.parse(previousValue));
+                        }
+                    }
+                }
+                else if (warmUpValue) {
+                    warmUpValue = JSON.parse(warmUpValue);
+                    console.log('get the warmUpValue from redis, the key is: ' + warmUpKey);
+                    logger.info('get the warmUpValue from redis, the key is: ' + warmUpKey);
+                    return resolve(warmUpValue);
+                }
+            } catch (err) {
+                console.error(err);
+                logger.error(err);
+                return reject(err);
+            }
+        })
+    },
+
+    //共同被投资关系路径查询
+    queryCommonInvestedByPath: async function (from, to, CIVBDepth, lowWeight, highWeight, isExtra, pathType) {
+        return new Promise(async function (resolve, reject) {
+
+            try {
+                let j = 5;
+                //先从redis中预热的数据中查询是否存在预热值
+                let warmUpKey = [from, to, CIVBDepth, j, isExtra, pathType].join('-');
+                let cacheKey = [j, from, to, CIVBDepth, lowWeight, highWeight, isExtra, pathType].join('-');
+                let warmUpValue = null;
+                if (warmUpSwitch == 'on') {
+                    warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
+                }
+                if (!warmUpValue) {
+                    if (from == null || to == null) {
+                        console.error(`${from} or ${to} is not in the neo4j database at all !`);
+                        logger.error(`${from} or ${to} is not in the neo4j database at all !`);
+                        let nodeResults = {
+                            nodeResultOne: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${j}`, typeName: 'CommonInvestedByPath', names: [], codes: [] } },
+                            nodeResultTwo: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_10`, typeName: 'guarantees', names: [], codes: [] } },
+                            nodeResultThree: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_11`, typeName: 'family', names: [], codes: [] } }
+                        };
+                        return resolve(nodeResults);
+                    }
+                    else if (from != null && to != null) {
+                        let lowWeightFilter = null;
+                        let highWeightFilter = null;
+                        let edgeCollectionName = null;
+                        let isExtraFilter = null;
+                        if (isExtra == 0 || isExtra == '0') {
+                            isExtraFilter = 'filter v.isExtra == 0';
+                        }
+                        if (lowWeight) {
+                            lowWeightFilter = `filter e.weight >= ${lowWeight}`;
+                        }
+                        if (highWeight) {
+                            highWeightFilter = `filter e.weight <= ${highWeight}`;
+                        }
+                        let invest = config.arangodbInfo.edgeCollectionName.invests;
+                        let family = config.arangodbInfo.edgeCollectionName.family;
+                        let guanrantee = config.arangodbInfo.edgeCollectionName.guarantees;
+                        if (pathType == 'invests' || !pathType) {
+                            edgeCollectionName = invest;
+                        }
+                        else if (pathType == 'all') {
+                            edgeCollectionName = `${invest}, ${guanrantee}, any ${family}`;
+                        }
+                        let queryBody =
+                                        `
+                                        let from = 'nodes/${from}'
+                                        let to = 'nodes/${to}'
+                                        for v1, e1, p1 in 1..${CIVBDepth/2} inbound from
+                                            ${edgeCollectionName}
+                                            filter v1.flag != 1 && e1.flag != 1
+                                            filter p1.edges[*].flag all != 1
+                                            ${isExtraFilter}
+                                            ${lowWeightFilter}
+                                            ${highWeightFilter}
+                                            for v2, e2, p2 in 1..${CIVBDepth/2} inbound to
+                                                ${edgeCollectionName}
+                                                filter v2.flag != 1 && e2.flag != 1
+                                                filter p2.edges[*].flag all != 1
+                                                ${isExtraFilter}
+                                                ${lowWeightFilter}
+                                                ${highWeightFilter}
+                                                filter e1._from == e2._from
+                                                return distinct {'edges': append(p1.edges, p2.edges), 'vertices': append(p1.vertices, p2.vertices)}                                        `;
+                        queryBody = queryBody.replace(/null/g, '');  
+                        let now = 0;
+                        let previousValue = null;
+                        if (cacheSwitch == 'on') {
+                            //缓存
+                            previousValue = await cacheHandlers.getCache(cacheKey);
+                        }
+                        if (!previousValue) {
+                            let commonInvestedByPathQueryCost = 0;
+                            now = Date.now();
+                            let retryCountThree = 0;
+                            let resultPromise = null;
+                            do {
+                                try {
+                                    resultPromise = await executeQuery(queryBody);
+                                    break;
+                                } catch (err) {
+                                    retryCountThree++;
+                                    console.error(err);
+                                    logger.error(err);
+                                }
+                            } while (retryCountThree < 3)
+                            if (retryCountThree == 3) {
+                                console.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                                logger.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                            }
+                            console.log('query arangodb server: ' + queryBody);
+                            logger.info('query arangodb server: ' + queryBody);
+                            commonInvestedByPathQueryCost = Date.now() - now;
+                            logger.info(`from: ${from} to: ${to}` + " CommonInvestedByPathQueryCost: " + commonInvestedByPathQueryCost + 'ms');
+                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ` from: ${from} to: ${to}` + ", CommonInvestedByPathQueryCost: " + commonInvestedByPathQueryCost + 'ms');
+                            if (resultPromise.length > 0) {
+                                let result = await handlerQueryResult2(from, to, resultPromise, j);
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(result));
+                                }
+                                if (warmUpSwitch == 'on') {
+                                    //根据预热条件的阈值判断是否要加入预热
+                                    let queryCostUp = config.warmUp_Condition.queryNeo4jCost;
+                                    let recordsUp = config.warmUp_Condition.queryNeo4jRecords;
+                                    if (commonInvestedByPathQueryCost >= queryCostUp || resultPromise.records.length >= recordsUp) {
+                                        let conditionsKey = config.redisKeyName.conditionsKey;
+                                        let conditionsField = [from, to].join('->');
+                                        let conditionsValue = { from: from, to: to, depth: [CIVBDepth], relations: [j], cost: commonInvestedByPathQueryCost };
+                                        cacheHandlers.setWarmUpConditionsToRedis(conditionsKey, conditionsField, JSON.stringify(conditionsValue));
+                                        cacheHandlers.setWarmUpPathsToRedis(warmUpKey, JSON.stringify(result));
+                                    }
+                                }
+                                return resolve(result);
+                            } else if (resultPromise.length == 0) {
+                                let nodeResults = {
+                                    nodeResultOne: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${j}`, typeName: 'CommonInvestedByPath', names: [], codes: [] } },
+                                    nodeResultTwo: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_10`, typeName: 'guarantees', names: [], codes: [] } },
+                                    nodeResultThree: { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_11`, typeName: 'family', names: [], codes: [] } }
+                                };
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(nodeResults));
+                                }
+                                return resolve(nodeResults);
+                            }
+                        }
+                        else if (previousValue) {
+                            return resolve(JSON.parse(previousValue));
+                        }
+                    }
+                }
+                else if (warmUpValue) {
+                    warmUpValue = JSON.parse(warmUpValue);
+                    console.log('get the warmUpValue from redis, the key is: ' + warmUpKey);
+                    logger.info('get the warmUpValue from redis, the key is: ' + warmUpKey);
+                    return resolve(warmUpValue);
+                }
+            } catch (err) {
+                console.error(err);
+                logger.error(err);
+                return reject(err);
+            }
+        })
+    },
+
+    //高管投资关系路径查询
+    queryExecutiveInvestPath: async function (code, surStatus) {
+        return new Promise(async function (resolve, reject) {
+
+            try {
+                let now = Date.now();
+                let j = 12;                                                              //记录每种路径查询方式索引号,directInvestPathQuery索引为6
+                let pathType = 'executes';
+                let cacheKey = [j, code, pathType].join('-');
+                let previousValue = null;
+                if (cacheSwitch == 'on') {
+                    //缓存
+                    previousValue = await cacheHandlers.getCache(cacheKey);
+                }
+                if (!previousValue) {
+                    let queryBody = null;
+                    let surStatusFilter = null;
+                    let nodeCollectionName = config.arangodbInfo.nodeCollectionName;
+                    let edgeCollectionName = config.arangodbInfo.edgeCollectionName[`${pathType}`];
+                    if (surStatus == 1 || surStatus == '1') {
+                        surStatusFilter = 'filter v.surStatus == 1';
+                    }
+                    queryBody = 
+                                `for v, e, p in 1..1 outbound '${nodeCollectionName}/${code}' ${edgeCollectionName}
+                                    filter v.flag != 1 && e.flag != 1
+                                    ${surStatusFilter}
+                                    return distinct p`;
+                    queryBody = queryBody.replace(/null/g, '');
+                    let retryCount = 0;
+                    let resultPromise = null;
+                    do {
+                        try {
+                            resultPromise = await executeQuery(queryBody);
+                            break;
+                        } catch (err) {
+                            retryCount++;
+                            console.error(err);
+                            logger.error(err);
+                        }
+                    } while (retryCount < 3)
+                    if (retryCount == 3) {
+                        console.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                        logger.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                    }
+                    console.log('query arangodb server: ' + queryBody);
+                    logger.info('query arangodb server: ' + queryBody);
+                    let executiveInvestPathQueryCost = Date.now() - now;
+                    logger.info(`code: ${code}` + " executiveInvestPathQueryCost: " + executiveInvestPathQueryCost + 'ms');
+                    console.log("time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + ` code: ${code} ` + ",  executiveInvestPathQueryCost: " + executiveInvestPathQueryCost + 'ms');
+                    if (resultPromise.length > 0) {
+                        let result = await resultHandlers.handlerPromise2(null, null, resultPromise, j);
+                        let afterPathDetailFour = setSourceTarget2(result.pathTypeFour.mapRes, result.pathTypeFour.dataDetail.data.pathDetail);
+                        let sortPathDetailFour = afterPathDetailFour.sort(sortRegName);                                   //按注册资本、名称排序
+                        result.pathTypeFour.dataDetail.data.pathDetail = sortPathDetailFour;
+                        let newResult = result.pathTypeFour.dataDetail;
+                        if (cacheSwitch == 'on') {
+                            cacheHandlers.setCache(cacheKey, JSON.stringify(newResult));
+                        }
+                        return resolve(newResult);
+                    }
+                    else {
+                        return resolve({ data: { pathDetail: [], pathNum: 0 }, type: `result_12`, typeName: 'executiveInvestPath', names: [] });
+                    }
+                }
+                else if (previousValue) {
+                    return resolve(JSON.parse(previousValue));
+                }
+            }
+            catch (err) {
+                console.error(err);
+                logger.error(err);
+                return reject(err);
+            }
+        })
+    },
+
+    //担保关系的路径查询
+    queryGuaranteePath: async function (from, to, GTDepth) {
+        return new Promise(async function (resolve, reject) {
+
+            try {
+                let j = 8;                                                                                   //记录每种路径查询方式索引号
+                //先从redis中预热的数据中查询是否存在预热值
+                let warmUpKey = [from, to, GTDepth, j].join('-');
+                let cacheKey = [j, from, to, GTDepth, 'GT'].join('-');
+                let warmUpValue = null;
+                if (warmUpSwitch == 'on') {
+                    warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
+                }
+                if (!warmUpValue) {
+                    if (from == null || to == null) {
+                        console.error(`${from} or ${to} is not in the database at all !`);
+                        logger.error(`${from} or ${to} is not in the database at all !`);
+                        let nodeResults = { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${j}`, typeName: 'GuaranteePath', names: [], codes: [] } };
+                        return resolve(nodeResults);
+                    }
+                    else if (from != null && to != null) {
+                        let queryBody = null;
+                        let nodeCollectionName = config.arangodbInfo.nodeCollectionName;
+                        let guanrantee = config.arangodbInfo.edgeCollectionName.guarantees;
+                        let queryFirst =
+                                        `
+                                        let from = '${nodeCollectionName}/${from}'
+                                        let to = '${nodeCollectionName}/${to}'
+                                        for v, e in 1..2 outbound from ${guanrantee}
+                                            filter v.flag != 1 && e.flag != 1
+                                            collect with count into lf
+                                        for v, e in 1..2 inbound to ${guanrantee}
+                                            filter v.flag != 1 && e.flag != 1
+                                            collect with count into lt
+                                        let s = (lf <= lt ? '${from}' : '${to}')
+                                        let t = (lf > lt ? '${from}' : '${to}')
+                                        let direction = (lf <= lt ? 'outbound' : 'inbound')
+                                        return {s, t, lf, lt, direction}
+                                        `;
+                        console.log('queryFirst: ', queryFirst);
+                        logger.info('queryFirst: ', queryFirst);
+                        let queryFirstStart = Date.now();
+                        let retryCount = 0;
+                        let resultOne = null;
+                        do {
+                            try {
+                                resultOne = await executeQuery(queryFirst);
+                                break;
+                            } catch (err) {
+                                retryCount++;
+                                console.error(err);
+                                logger.error(err);
+                                return reject(err);
+                            }
+                        } while (retryCount < 3)
+                        if (retryCount == 3) {
+                            console.error('queryFirst execute fail after trying 3 times: ' + queryBody);
+                            logger.error('queryFirst execute fail after trying 3 times: ' + queryBody);
+                        }
+                        let queryFirstCost = Date.now() - queryFirstStart;
+                        let source = null;
+                        let target = null;
+                        let direction = null;
+                        if (resultOne.length > 0 && resultOne[0].hasOwnProperty('direction')) {
+                            source = resultOne[0].s;
+                            target = resultOne[0].t;
+                            sourceLen = resultOne[0].lf;
+                            targetLen = resultOne[0].lt;
+                            direction = resultOne[0].direction;
+                            console.log(`source: ${source}, sourceLen: ${sourceLen}, target: ${target}, targetLen: ${targetLen}, direction is: ${direction}, queryFirstCost: ${queryFirstCost} ms`);
+                            logger.info(`source: ${source}, sourceLen: ${sourceLen}, target: ${target}, targetLen: ${targetLen}, direction is: ${direction}, queryFirstCost: ${queryFirstCost} ms`);
+                        }
+                        else {
+                            console.error('queryFirst failure!');
+                            logger.error('queryFirst failure!');
+                            return reject(err);
+                        }
+                        queryBody =
+                                    `
+                                    for source in nodes
+                                        filter source.flag != 1
+                                        filter source._key == '${source}'
+                                        limit 1
+                                    for v, e, p
+                                        in 1..${GTDepth} ${direction} source
+                                        ${guanrantee}
+                                        filter v.flag != 1 && e.flag != 1
+                                        filter p.edges[*].flag all != 1
+                                        filter v._key == '${target}'
+                                        return distinct p
+                                    `;
+                        queryBody = queryBody.replace(/null/g, '');
+                        let now = 0;
+                        let previousValue = null;
+                        if (cacheSwitch == 'on') {
+                            //缓存
+                            previousValue = await cacheHandlers.getCache(cacheKey);
+                        }
+                        if (!previousValue) {
+                            let resultPromise = null;
+                            now = Date.now();
+                            let retryCountThree = 0;
+                            do {
+                                try {
+                                    resultPromise = await executeQuery(queryBody);
+                                    break;
+                                } catch (err) {
+                                    retryCountThree++;
+                                    console.error(err);
+                                    logger.error(err);
+                                }
+                            } while (retryCountThree < 3)
+                            if (retryCountThree == 3) {
+                                console.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                                logger.error('executeQuery execute fail after trying 3 times: ' + guaranteePathQuery);
+                            }
+                            console.log('query arangodb server: ' + queryBody);
+                            logger.info('query arangodb server: ' + queryBody);
+                            let guaranteePathQueryCost = Date.now() - now;
+                            logger.info(`from: ${from} to: ${to}` + " guaranteePathQueryCost: " + guaranteePathQueryCost + 'ms');
+                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + `from: ${from} to: ${to}` + ", guaranteePathQueryCost: " + guaranteePathQueryCost + 'ms');
+                            if (resultPromise.length > 0) {
+                                let result = await handlerQueryResult2(from, to, resultPromise, j);
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(result));
+                                }
+                                if (warmUpSwitch == 'on') {
+                                    //根据预热条件的阈值判断是否要加入预热
+                                    let queryCostUp = config.warmUp_Condition.queryNeo4jCost;
+                                    let recordsUp = config.warmUp_Condition.queryNeo4jRecords;
+                                    if (guaranteePathQueryCost >= queryCostUp || resultPromise.length >= recordsUp) {
+                                        let conditionsKey = config.redisKeyName.conditionsKey;
+                                        let conditionsField = [from, to].join('->');
+                                        let conditionsValue = { from: from, to: to, depth: [GTDepth], relations: [j], cost: guaranteePathQueryCost };
+                                        cacheHandlers.setWarmUpConditionsToRedis(conditionsKey, conditionsField, JSON.stringify(conditionsValue));
+                                        cacheHandlers.setWarmUpPathsToRedis(warmUpKey, JSON.stringify(result));
+                                    }
+                                }
+                                return resolve(result);
+                            }
+                            else if (resultPromise.records.length == 0) {
+                                let nodeResults = { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${j}`, typeName: 'GuaranteePath', names: [], codes: [] } };
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(nodeResults));
+                                }
+                                return resolve(nodeResults);
+                            }
+                        }
+                        else if (previousValue) {
+                            return resolve(JSON.parse(previousValue));
+                        }
+                    }
+                }
+                else if (warmUpValue) {
+                    warmUpValue = JSON.parse(warmUpValue);
+                    console.log('get the warmUpValue from redis, the key is: ' + warmUpKey);
+                    logger.info('get the warmUpValue from redis, the key is: ' + warmUpKey);
+                    return resolve(warmUpValue);
+                }
+            } catch (err) {
+                console.error(err);
+                logger.error(err);
+                return reject(err);
+            }
+        }) 
+    },
+
+    //直接被投资关系的路径查询
+    queryGuaranteedByPath: async function (from, to, GTBDepth) {
+        return new Promise(async function (resolve, reject) {
+
+            try {
+                let j = 9;                                                            //记录每种路径查询方式索引号
+                //先从redis中预热的数据中查询是否存在预热值
+                let warmUpKey = [from, to, GTBDepth, j].join('-');
+                let warmUpValue = await cacheHandlers.getWarmUpPathsFromRedis(warmUpKey);
+                let cacheKey = [j, from, to, GTBDepth, 'GTB'].join('-');
+                if (!warmUpValue) {
+                    if (from == null || to == null) {
+                        console.error(`${from} or ${to} is not in the neo4j database at all !`);
+                        logger.error(`${from} or ${to} is not in the neo4j database at all !`);
+                        // return resolve({ error: `${from}=nodeIdOne ${to}=nodeIdTwo` });
+                        let nodeResults = { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${j}`, typeName: 'GuaranteedByPath', names: [], codes: [] } };
+                        return resolve(nodeResults);
+                    }
+                    else if (from != null && to != null) {
+                        let queryBody = null;
+                        let nodeCollectionName = config.arangodbInfo.nodeCollectionName;
+                        let guanrantee = config.arangodbInfo.edgeCollectionName.guarantees;
+                        let queryFirst =
+                                        `
+                                        let from = '${nodeCollectionName}/${from}'
+                                        let to = '${nodeCollectionName}/${to}'
+                                        for v, e in 1..2 inbound from ${guanrantee}
+                                            filter v.flag != 1 && e.flag != 1
+                                            collect with count into lf
+                                        for v, e in 1..2 outbound to ${guanrantee}
+                                            filter v.flag != 1 && e.flag != 1
+                                            collect with count into lt
+                                        let s = (lf <= lt ? '${from}' : '${to}')
+                                        let t = (lf > lt ? '${from}' : '${to}')
+                                        let direction = (lf <= lt ? 'inbound' : 'outbound')
+                                        return {s, t, lf, lt, direction}
+                                        `;
+                        console.log('queryFirst: ', queryFirst);
+                        logger.info('queryFirst: ', queryFirst);
+                        let queryFirstStart = Date.now();
+                        let retryCount = 0;
+                        let resultOne = null;
+                        do {
+                            try {
+                                resultOne = await executeQuery(queryFirst);
+                                break;
+                            } catch (err) {
+                                retryCount++;
+                                console.error(err);
+                                logger.error(err);
+                                return reject(err);
+                            }
+                        } while (retryCount < 3)
+                        if (retryCount == 3) {
+                            console.error('queryFirst execute fail after trying 3 times: ' + queryBody);
+                            logger.error('queryFirst execute fail after trying 3 times: ' + queryBody);
+                        }
+                        let queryFirstCost = Date.now() - queryFirstStart;
+                        let source = null;
+                        let target = null;
+                        let direction = null;
+                        if (resultOne.length > 0 && resultOne[0].hasOwnProperty('direction')) {
+                            source = resultOne[0].s;
+                            target = resultOne[0].t;
+                            sourceLen = resultOne[0].lf;
+                            targetLen = resultOne[0].lt;
+                            direction = resultOne[0].direction;
+                            console.log(`source: ${source}, sourceLen: ${sourceLen}, target: ${target}, targetLen: ${targetLen}, direction is: ${direction}, queryFirstCost: ${queryFirstCost} ms`);
+                            logger.info(`source: ${source}, sourceLen: ${sourceLen}, target: ${target}, targetLen: ${targetLen}, direction is: ${direction}, queryFirstCost: ${queryFirstCost} ms`);
+                        }
+                        else {
+                            console.error('queryFirst failure!');
+                            logger.error('queryFirst failure!');
+                            return reject(err);
+                        }
+                        queryBody =
+                                    `
+                                    for source in nodes
+                                        filter source.flag != 1
+                                        filter source._key == '${source}'
+                                        limit 1
+                                    for v, e, p
+                                        in 1..${GTBDepth} ${direction} source
+                                        ${guanrantee}
+                                        filter v.flag != 1 && e.flag != 1
+                                        filter p.edges[*].flag all != 1
+                                        filter v._key == '${target}'
+                                        return distinct p
+                                    `;
+                        queryBody = queryBody.replace(/null/g, '');   
+                        let previousValue = null;
+                        let now = 0;
+                        if (cacheSwitch == 'on') {
+                            //缓存
+                            previousValue = await cacheHandlers.getCache(cacheKey);
+                        }
+                        if (!previousValue) {
+                            let resultPromise = null;
+                            now = Date.now();
+                            let retryCountThree = 0;
+                            do {
+                                try {
+                                    resultPromise = await executeQuery(queryBody);
+                                    break;
+                                } catch (err) {
+                                    retryCountThree++;
+                                    console.error(err);
+                                    logger.error(err);
+                                }
+                            } while (retryCountThree < 3)
+                            if (retryCountThree == 3) {
+                                console.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                                logger.error('executeQuery execute fail after trying 3 times: ' + queryBody);
+                            }
+                            console.log('query arangodb server: ' + queryBody);
+                            logger.info('query arangodb server: ' + queryBody);
+                            let guaranteedByPathQueryCost = Date.now() - now;
+                            logger.info(`from: ${from} to: ${to}` + " guaranteedByPathQueryCost: " + guaranteedByPathQueryCost + 'ms');
+                            console.log("Time: " + moment(Date.now()).format("YYYY-MM-DD HH:mm:ss") + `from: ${from} to: ${to}` + ", guaranteedByPathQueryCost: " + guaranteedByPathQueryCost + 'ms');
+                            if (resultPromise.length > 0) {
+                                let result = await handlerQueryResult2(from, to, resultPromise, j);
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(result));
+                                }
+                                if (warmUpSwitch == 'on') {
+                                    //根据预热条件的阈值判断是否要加入预热
+                                    let queryCostUp = config.warmUp_Condition.queryNeo4jCost;
+                                    let recordsUp = config.warmUp_Condition.queryNeo4jRecords;
+                                    if (guaranteedByPathQueryCost >= queryCostUp || resultPromise.length >= recordsUp) {
+                                        let conditionsKey = config.redisKeyName.conditionsKey;
+                                        let conditionsField = [from, to].join('->');
+                                        let conditionsValue = { from: from, to: to, depth: [GTBDepth], relations: [j], cost: guaranteedByPathQueryCost };
+                                        cacheHandlers.setWarmUpConditionsToRedis(conditionsKey, conditionsField, JSON.stringify(conditionsValue));
+                                        cacheHandlers.setWarmUpPathsToRedis(warmUpKey, JSON.stringify(result));
+                                    }
+                                }
+                                return resolve(result);
+                            }
+                            else if (resultPromise.records.length == 0) {
+                                let nodeResults = { pathDetail: { data: { pathDetail: [], pathNum: 0 }, type: `result_${j}`, typeName: 'guaranteedByPath', names: [], codes: [] } };
+                                if (cacheSwitch == 'on') {
+                                    cacheHandlers.setCache(cacheKey, JSON.stringify(nodeResults));
+                                }
+                                return resolve(nodeResults);
+                            }
+                        }
+                        else if (previousValue) {
+                            return resolve(JSON.parse(previousValue));
+                        }
+                    }
+                }
+                else if (warmUpValue) {
+                    warmUpValue = JSON.parse(warmUpValue);
+                    console.log('get the warmUpValue from redis, the key is: ' + warmUpKey);
+                    logger.info('get the warmUpValue from redis, the key is: ' + warmUpKey);
+                    return resolve(warmUpValue);
+                }
+            } catch (err) {
+                console.error(err);
+                logger.error(err);
+                return reject(err);
+            }
+        })
+    }
 }
 
 module.exports = searchGraph;

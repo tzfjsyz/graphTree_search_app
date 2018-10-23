@@ -9,7 +9,7 @@
         //     "type": "node",
         //     "request": "launch",
         //     "name": "Launch Program",
-        //     "program": "${workspaceFolder}/graphTree_search_app.js"
+        //     "program": "${workspaceFolder}/arangodb_search.js"
         // },
 
         //windows
@@ -17,7 +17,7 @@
             "type": "node",
             "request": "launch",
             "name": "Launch Program",
-            "program": "${workspaceRoot}\\graphTree_search_app.js"
+            "program": "${workspaceRoot}\\arangodb_search.js"
         }
     ]
 }

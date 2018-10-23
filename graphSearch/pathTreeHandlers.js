@@ -2,28 +2,9 @@
 wrote by tzf, 2018/4/11
 */
 const log4js = require('log4js');
-const req = require('require-yml')
-const config = req("config/source.yml");
-// log4js.configure({
-//     appenders: {
-//         'out': {
-//             type: 'file',         //文件输出
-//             filename: 'logs/queryDataInfo.log',
-//             maxLogSize: config.logInfo.maxLogSize
-//         }
-//     },
-//     categories: { default: { appenders: ['out'], level: 'info' } }
-// });
-// const logger = log4js.getLogger();
+const req = require('require-yml');
+const config = req('./config/source.yml');
 log4js.configure({
-    // appenders: {
-    //     'out': {
-    //         type: 'file',         //文件输出
-    //         filename: 'logs/queryDataInfo.log',
-    //         maxLogSize: config.logInfo.maxLogSize
-    //     }
-    // },
-    // categories: { default: { appenders: ['out'], level: 'info' } }
     appenders: {
         console: {
             type: 'console'
@@ -33,14 +14,16 @@ log4js.configure({
             filename: "./logs/log4js_log-",
             pattern: "yyyy-MM-dd.log",
             alwaysIncludePattern: true,
-            maxLogSize: config.logInfo.maxLogSize
+            maxLogSize: config.logInfo.maxLogSize,
+            backups: 10
         },
         error: {
             type: "dateFile",
             filename: "./logs/log4js_err-",
             pattern: "yyyy-MM-dd.log",
             alwaysIncludePattern: true,
-            maxLogSize: config.logInfo.maxLogSize
+            maxLogSize: config.logInfo.maxLogSize,
+            backups: 10
         },
         errorFilter: {
             type: "logLevelFilter",
@@ -49,12 +32,12 @@ log4js.configure({
         },
     },
     categories: {
-        default: { appenders: ['console', 'log', 'errorFilter'], level: 'info' }
+        default: { appenders: ['console', 'log', 'errorFilter'], level: 'debug' }
     },
     pm2: true,
     pm2InstanceVar: 'INSTANCE_ID'
 });
-const logger = log4js.getLogger('graphTree_search_app');
+const logger = log4js.getLogger('arangodb_search');
 
 //按数组长度从小到大升序排序
 function sortByPathLength(a, b) {

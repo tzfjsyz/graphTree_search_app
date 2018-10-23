@@ -1,30 +1,33 @@
-#连接的neo4j server服务器
-neo4jServer:
+#arangodb配置信息
+arangodbInfo:
   url:
-    bolt://10.10.15.129:7687
-    #bolt://10.10.15.27:7688
-  user:
-    neo4j
-  password:
-    #ywbz89
-    123456
+    'http://10.17.205.190:8529'
+  databaseName:
+    'graphDB'
+  nodeCollectionName:
+    'nodes'
+  edgeCollectionName:
+    invests:
+      relations_invest
+    guarantees:
+      relations_guarantee
+    family:
+      relations_family
+    executes: 
+      relations_execute
 
 #ITCode2->ITName
 dictionaryServer:
   host: 
     10.10.15.129
+    #10.10.15.137
   port:
     #8009
     8010
   path:
     #/lookup
-
-#ITCode数据来源
-mssql:
-  mssql://app:app127@10.10.15.44/CRDB
-  #mssql://app:app127@10.10.15.43/CRDB
   
-#设置查询neo4j server的超时时间
+#设置查询 server的超时时间
 lookupTimeout: 
   30000                                         #超时设置150s
   
@@ -34,10 +37,10 @@ sleepTime:
 
 #设置加入预热的path条件
 warmUp_Condition:
-  queryNeo4jCost:
-    2000                                        #查询neo4j所需时间
-  queryNeo4jRecords:
-    200                                        #查询neo4j返回记录数
+  queryCost:
+    2000                                        #查询arangodb所需时间
+  queryRecords:
+    200                                        #查询arangodb返回记录数
 
 #主动预热path的redis地址
 warmUp_RedisInfo:
@@ -47,6 +50,9 @@ warmUp_RedisInfo:
     redis://:finchina@10.15.97.135:6679/9       #存放paths
   TTL:
     86400
+  switch:
+    'off'
+    #'on'
     
 #设置cache的信息
 NodeCache:
@@ -61,6 +67,9 @@ NodeCache:
   autoFlushCache:                               #程序重启是否清空缓存
     'true'
     #'fasle'
+  switch:
+    'off'
+    #'on'
 
 #redis存储数据的keyName
 redisKeyName:
@@ -77,6 +86,24 @@ pathDepth:
     2                                           #直接投资关系路径深度
   DIBDepth: 
     2                                           #直接被投资关系路径深度
+  IVDepth:
+    6                                           #直接投资关系路径深度
+  IVBDepth: 
+    6                                           #直接被投资关系路径深度
+  FUDepth:
+    3                                           #全部路径深度
+  DIDepth:
+    3                                           #单个企业直接投资关系路径深度
+  DIBDepth:
+    3                                           #单个企业直接被投资关系路径深度
+  CIVDepth:                                     
+    4                                           #共同投资关系路径深度
+  CIVBDepth:
+    4                                           #共同被投资关系路径深度
+  GTDepth:
+    5                                           #担保关系路径深度
+  GTBDepth:
+    5                                           #被担保关系路径深度
 
 #默认请求时的参数, 数据预热使用
 defaultQueryParams:
@@ -84,18 +111,6 @@ defaultQueryParams:
     invests
   returnNoCodeNodes:                            #是否返回无机构代码的机构
     true
-  lowWeight:                                    #对外投资最低持股比例
-    0
-  highWeight:                                   #对外投资最高持股比例
-    100
-  lowFund:                                      #机构最低注册资本
-    null
-  highFund:                                     #机构最高注册资本
-    null
-  lowSubAmountRMB:                              #机构最低认缴金额
-    0
-  highSubAmountRMB:                             #机构最高认缴金额
-    100000000000000000
   returnBranches:                               #是否返回分支机构
     false
   surStatus:
